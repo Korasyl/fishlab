@@ -520,7 +520,7 @@
   function tourWire() {
     $('tourbtn').addEventListener('click', () => tourShow(0)); $('tournext').addEventListener('click', () => { if (tourAt >= TOUR.length - 1) tourEnd(); else tourShow(tourAt + 1); }); $('tourback').addEventListener('click', () => { if (tourAt > 0) tourShow(tourAt - 1); }); $('tourskip').addEventListener('click', tourEnd); addEventListener('keydown', e => { if (tourAt >= 0 && e.key === 'Escape') tourEnd(); });
     const msg = t => { $('tourmsg').textContent = t; };
-    if (window.FISHLAB_MOBILE) $('touredit').parentElement.hidden = true;      // the phone app: the tutorial's words are fixed (the user's wish)
+    if (window.FISHLAB_MOBILE) { $('touredit').parentElement.style.display = 'none'; $('toureditor').style.display = 'none'; }      // the phone app: the tutorial's words are fixed (the user's wish)
     $('touredit').addEventListener('click', () => { const ed = $('toureditor'); ed.hidden = !ed.hidden; if (!ed.hidden) { $('tourall').value = tourAsText(); msg(''); } tourShow(tourAt); });
     $('tourapply').addEventListener('click', () => {
       const parts = $('tourall').value.replace(/\r/g, '').split(/\n\s*---+\s*\n/); if (parts.length !== TOUR.length) { msg('There must be ' + TOUR.length + ' steps; this text has ' + parts.length + '. Nothing was changed.'); return; }
