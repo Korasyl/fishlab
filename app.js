@@ -1,4 +1,4 @@
-// ARCA FISH LAB v0.15 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.16 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
@@ -144,8 +144,26 @@
       S.T = keep; const done = new Set(); S.T.forEach(t => { if (t.some(i => S.P[i][2] > zb + E)) t.forEach(i => { if (!done.has(i) && S.P[i][2] > zb + E) { done.add(i); S.P[i] = [S.P[i][0], S.P[i][1], zb + (S.P[i][2] - zb) * c]; } }); });
     });
   }
+  // SIDE FINS THAT MOVE (v0.16; the user: "pectoral fins need movement, and the angle of the fin will dynamically dictate how they flap
+  // or wave to help the fish. This will occur both in the motion viewer and in the game"; "strictly for normal class fish").
+  // A fin set to Side is no longer part of a body slice: it is a piece of its own, cut ACROSS ITS HEIGHT into 3 bands. Band 0 hinges on
+  // the fin's root line (through P0, along u - finFrame), band 1 on the line between bands 0 and 1, band 2 on the next: a chain of hinges
+  // all parallel to the root, so the bands always share their edges (no gaps). Because it swings about its own root line, the way the fin
+  // is set decides the stroke: root along the body = it flaps up and down, root upright = it rows forward and back; leaned back, the swing
+  // gives way to a ripple running out along the fin. The same rule and numbers are in the game (Plugin.AquaLife.cs, AlSideFin).
+  // At most SFMAX fin pieces move (a mirrored fin is two); further side fins stay part of the body as before.
+  const SFMAX = 8, SFW = [0.45, 0.30, 0.25];
+  const clipH = (poly, lim, above) => { const out = []; for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length], da = above ? a.h - lim : lim - a.h, db = above ? b.h - lim : lim - b.h; if (da >= 0) out.push(a); if ((da > 0 && db < 0) || (da < 0 && db > 0)) { const t = da / (da - db); out.push({ p: a.p.map((v, c) => v + (b.p[c] - v) * t), u: a.u.map((v, c) => v + (b.u[c] - v) * t), h: a.h + (b.h - a.h) * t }); } } return out; };
+  // how far hinge j of a side fin is bent (radians). flank +1 / -1; sweep 0..1 = how far it is leaned toward head or tail; back = how much a
+  // swing about its root carries the fin toward the tail (-1..1; near 0 for a wing); act = how hard the fish swims (0..1.25); burn / glide =
+  // a vent fish's burn and the glide after it; turnIn = +1 this fin is on the inside of the turn, -1 on the outside; phi = the fins' clock
+  function sfBend(j, flank, sweep, back, act, burn, glide, turnIn, phi) {
+    const amp = (0.10 + 0.42 * act) * (1 - 0.75 * sweep) * (1 + 0.7 * burn) * (1 - 0.85 * glide) * (turnIn > 0 ? 1 - 0.85 * turnIn : 1 - 0.4 * turnIn);
+    const rip = (0.06 + 0.22 * act) * (0.25 + 0.75 * sweep) * (1 - 0.7 * glide), hold = 0.55 * glide * back - 0.5 * Math.max(0, turnIn) * back;
+    return SFW[j] * (flank * (amp * Math.sin(phi - 0.9 * j) + rip * Math.sin(1.5 * phi - 2.1 * j)) + hold);
+  }
   function addSideFins() {
-    const k = built.k, cuts = built.tables.cut; trimSheet();
+    const k = built.k, cuts = built.tables.cut; trimSheet(); built.sfins = [];
     D.fins.forEach((f, i) => {
       const sw = swMap[2 + i], pk = packs[2 + i]; if ((!sw && !pk) || f.pts.length < 3) return;
       const uvp = (z, hg) => [(pk.x0 + 2 + (z - pk.z0) * pk.den) / W, (pk.y0 + pk.h - 2 - hg * pk.den) / H];
@@ -153,8 +171,18 @@
       const pol = ol.map((p, n) => [Math.atan2(Hs[n], p[0] - zc), Math.hypot(Hs[n], p[0] - zc)]), rmax = Math.max(1e-6, ...pol.map(q => q[1]));
       const uv = (ang, r) => { const al = clamp(1 - ang / Math.PI, 0, 1), d = clamp(r / rmax, 0, 1); return sw.vert ? [(sw.x0 + 0.5 + d * (sw.x1 - sw.x0)) / W, (sw.y0 + 0.5 + al * (sw.y1 - sw.y0)) / H] : [(sw.x0 + 0.5 + al * (sw.x1 - sw.x0)) / W, (sw.y0 + 0.5 + d * (sw.y1 - sw.y0)) / H]; };
       const S = built.slices[Math.min(built.slices.length - 1, cuts.filter(c => c < zc * k).length)], sc = v => [v[0] * k, v[1] * k, v[2] * k];
-      (single(f) ? [1] : f.mirror === false ? [f.flank || 1] : [1, -1]).forEach(s => {
+      const flanks = single(f) ? [1] : f.mirror === false ? [f.flank || 1] : [1, -1], hm = Math.max(...Hs), moves = f.side === 'side' && hm > 0.004 && built.sfins.length + flanks.length <= SFMAX;
+      flanks.forEach(s => {
         const O = finPt(f, s, zc, -0.012), P = ol.map((p, n) => finPt(f, s, p[0], Hs[n]));
+        if (moves) {
+          const Q = finFrame(f, s), lim = [-1, hm / 3, 2 * hm / 3, 1e9], bands = [0, 1, 2].map(() => ({ P: [], N: [], UV: [], T: [] }));
+          for (let n = 0; n < ol.length - 1; n++) {
+            const A = P[n], Bq = P[n + 1], e1 = [A[0] - O[0], A[1] - O[1], A[2] - O[2]], e2 = [Bq[0] - O[0], Bq[1] - O[1], Bq[2] - O[2]]; let nr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const nl = Math.hypot(nr[0], nr[1], nr[2]); if (nl < 1e-12) continue; nr = nr.map(v => v / nl);
+            const tri = [{ p: O, u: pk ? uvp(zc, 0) : uv((pol[n][0] + pol[n + 1][0]) / 2, 0), h: -0.012 }, { p: A, u: pk ? uvp(ol[n][0], Hs[n]) : uv(pol[n][0], pol[n][1]), h: Hs[n] }, { p: Bq, u: pk ? uvp(ol[n + 1][0], Hs[n + 1]) : uv(pol[n + 1][0], pol[n + 1][1]), h: Hs[n + 1] }];
+            bands.forEach((bd, j) => { const pg = clipH(clipH(tri, lim[j], true), lim[j + 1], false); for (let q = 1; q + 1 < pg.length; q++) [[nr, [0, q, q + 1]], [nr.map(v => -v), [0, q + 1, q]]].forEach(([nn, order]) => { const i0 = bd.P.length; order.forEach(o => { bd.P.push(sc(pg[o].p)); bd.N.push(nn); bd.UV.push(pg[o].u); }); bd.T.push([i0, i0 + 1, i0 + 2]); }); });
+          }
+          if (bands.every(bd => bd.T.length)) { built.sfins.push({ fin: i, seg: built.slices.indexOf(S), flank: s, P0: sc(Q.P0), u: Q.u, v: Q.v, hs: [0, hm / 3 * k, 2 * hm / 3 * k], sweep: Math.min(1, Math.abs(f.lean || 0) / 60), back: Q.u[0] * Q.v[1] - Q.u[1] * Q.v[0], bands }); return; }
+        }
         for (let n = 0; n < ol.length - 1; n++) {
           const A = P[n], Bq = P[n + 1], e1 = [A[0] - O[0], A[1] - O[1], A[2] - O[2]], e2 = [Bq[0] - O[0], Bq[1] - O[1], Bq[2] - O[2]]; let nr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const nl = Math.hypot(nr[0], nr[1], nr[2]); if (nl < 1e-12) continue; nr = nr.map(v => v / nl);
           const uo = pk ? uvp(zc, 0) : uv((pol[n][0] + pol[n + 1][0]) / 2, 0), ua = pk ? uvp(ol[n][0], Hs[n]) : uv(pol[n][0], pol[n][1]), ub = pk ? uvp(ol[n + 1][0], Hs[n + 1]) : uv(pol[n + 1][0], pol[n + 1][1]);
@@ -383,7 +411,7 @@
   function fit() { const r = $('stage').getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1), w = Math.max(200, Math.round(r.width * dpr)), h = Math.max(150, Math.round(r.height * dpr)); if (tk.width !== w || tk.height !== h) { tk.width = hud.width = w; tk.height = hud.height = h; fbo = null; } }
   function meshUp() {
     if (!gl || !built) return; bufs.forEach(b => gl.deleteBuffer(b.b)); bufs = [];
-    built.slices.forEach(s => { const a = new Float32Array(s.T.length * 3 * 8); let o = 0; s.T.forEach(t => t.forEach(i => { a.set(s.P[i], o); a.set(s.N[i], o + 3); a.set(s.UV[i], o + 6); o += 8; })); const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, a, gl.STATIC_DRAW); bufs.push({ b, n: s.T.length * 3 }); });
+    built.slices.concat(...(built.sfins || []).map(sf => sf.bands)).forEach(s => { const a = new Float32Array(s.T.length * 3 * 8); let o = 0; s.T.forEach(t => t.forEach(i => { a.set(s.P[i], o); a.set(s.N[i], o + 3); a.set(s.UV[i], o + 6); o += 8; })); const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, a, gl.STATIC_DRAW); bufs.push({ b, n: s.T.length * 3 }); });
   }
   const mul = (a, b) => { const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3]; return o; };
   const ident = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), trans = (x, y, z) => { const m = ident(); m[12] = x; m[13] = y; m[14] = z; return m; };
@@ -410,6 +438,18 @@
       gl.bindBuffer(gl.ARRAY_BUFFER, bufs[j].b); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 32, 12); gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 32, 24);
       gl.drawArrays(gl.TRIANGLES, 0, bufs[j].n);
     }
+    // the side fins that move: each band rides on its body section, bent at its hinges (sfLocal; nothing bent outside the Motion tab)
+    (built.sfins || []).forEach((sf, n) => { for (let j = 0; j < 3; j++) { const bf = bufs[6 + n * 3 + j], m = mats[sf.seg], lc = sfLocal[n * 3 + j]; if (!bf) return;
+      gl.uniformMatrix4fv(gl.getUniformLocation(p, 'mvp'), false, lc ? mul(m.mvp, lc) : m.mvp); gl.uniformMatrix4fv(gl.getUniformLocation(p, 'mdl'), false, lc ? mul(m.mdl, lc) : m.mdl); gl.uniform1f(gl.getUniformLocation(p, 'cam'), m.cam);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bf.b); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 32, 12); gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 32, 24);
+      gl.drawArrays(gl.TRIANGLES, 0, bf.n); } });
+  }
+  let sfLocal = [];
+  const axisRot = (u, a) => { const l = Math.hypot(u[0], u[1], u[2]) || 1, x = u[0] / l, y = u[1] / l, z = u[2] / l, c = Math.cos(a), s = Math.sin(a), t = 1 - c, m = ident(); m[0] = c + x * x * t; m[1] = y * x * t + z * s; m[2] = z * x * t - y * s; m[4] = x * y * t - z * s; m[5] = c + y * y * t; m[6] = z * y * t + x * s; m[8] = x * z * t + y * s; m[9] = y * z * t - x * s; m[10] = c + z * z * t; return m; };
+  function sfPose(t, swim, turn, ph) {
+    sfLocal = []; const vents = ((D.features || {}).vents || []).length > 0, burn = vents ? BUB.burn : 0, glide = vents && swim ? 1 - BUB.burn : 0, phi = 2.2 * t + (swim ? 0.8 * ph : 0);
+    (built.sfins || []).forEach(sf => { let chain = ident(); for (let j = 0; j < 3; j++) { const H = [sf.P0[0] + sf.v[0] * sf.hs[j], sf.P0[1] + sf.v[1] * sf.hs[j], sf.P0[2] + sf.v[2] * sf.hs[j]];
+      chain = mul(chain, mul(trans(H[0], H[1], H[2]), mul(axisRot(sf.u, sfBend(j, sf.flank, sf.sweep, sf.back, swim ? 1 : 0.15, burn, glide, clamp(sf.flank * turn / 0.16, -1, 1), phi)), trans(-H[0], -H[1], -H[2])))); sfLocal.push(chain); } });
   }
   // CAVITATION BUBBLES ON THE MOTION TAB (v0.15; the user: "Make the cavitation bubbles visible in the motion preview"). The game's own
   // rules and numbers (Plugin.AquaLife.cs, AlEmberBubbles): a fish with vent ports swims by short burns; while it burns a bubble leaves a
@@ -472,7 +512,7 @@
         const vh = i ? h2 : tk.height - h2, R = mul(rotX(d[1]), rotY(d[0])), hw = 0.52 * k * SPAN / SV.zoom, hh = hw * vh / tk.width, o = ident(); o[0] = 1 / hw; o[5] = 1 / hh; o[10] = -1 / (4 * k * SPAN); o[12] = d[2] * (SV.px - (SPAN - 1) / 2) * k / hw; o[13] = d[3] * SV.py * k / hh;
         const m = { mvp: mul(o, R), mdl: ident(), cam: R[2] < 0 ? -1 : 1 }; lastViews.push({ x: 0, y: i ? 0 : h2, w: tk.width, h: vh, mats: [m, m, m, m, m, m], label: d[4], sx: d[2], sy: d[3], nomid: d[1] !== 0 });      // nomid: seen from above or below, the fin sheet is edge-on - leave it out
       });
-      MV = null;
+      MV = null; sfLocal = [];
     } else {
       if (pressed('v-spin') && !d3.orbit && !reduce && !hold) yaw += 0.004;
       const asp = tk.width / tk.height, len = D.lenCm / 100, dist = len * 1.7 * zoom * Math.max(1, 1.35 / asp), view = mul(trans(panX * len, panY * len, -dist), mul(rotX(pitch), mul(rotY(yaw), trans(0, 0, -VIEWC * built.k)))), pr = persp(0.7, asp, len * 0.05, len * 30), vp = mul(pr, view);
@@ -483,6 +523,7 @@
         const iv = inv(mul(view, chain)); mats.push({ mvp: mul(vp, chain), mdl: chain, cam: iv && iv[12] < 0 ? -1 : 1 });
       }
       MV = hold ? { m: mats[0].mvp, inv: inv(mats[0].mvp) } : null; lastViews.push({ x: 0, y: 0, w: tk.width, h: tk.height, mats });
+      if (tab === 'move' && !reduce) sfPose(t, swim, turn, ph); else sfLocal = [];
       if (tab === 'move' && ((D.features || {}).vents || []).length) { bubStep(t, mats, swim); bubV = { vp, px: pr[5] * tk.height / 2 }; }
     }
     lastMats = lastViews[0].mats;
@@ -936,6 +977,10 @@
     if (hasBrush) put('lb', await pack(u8(lbOut))); if (a.any) put('lg', await pack(u8(L.A.gimg))); if (anyCut) put('lx', await pack(cut));
     if (!D.look.glowLit) { put('lit', await pack(a.lit)); if (b) put('lit2', await pack(b.lit)); }
     for (let s = 0; s < 6; s++) put('m' + s, await pack(C.writeMwm(PAT, built.slices[s])));
+    // (v0.16) the side fins that move: how many; for each its body section, flank, root point, root line, the way it stands, its two upper
+    // hinge heights (metres), sweep and "back" (see sfBend) - and its three bands as models
+    const sfl = built.sfins || []; if (sfl.length) put('sf', sfl.length);
+    for (let n = 0; n < sfl.length; n++) { const q = sfl[n]; put('sf' + n, [q.seg, q.flank].concat(q.P0, q.u, q.v, [q.hs[1], q.hs[2], q.sweep, q.back]).map(v => +(+v).toFixed(5)).join(',')); for (let j = 0; j < 3; j++) put('sf' + n + 'b' + j, await pack(C.writeMwm(PAT, q.bands[j]))); }
     D.v = 4; put('design', await pack(new TextEncoder().encode(JSON.stringify(D)))); put('paint', await pack(new Uint8Array(L.A.paint.buffer.slice(0)))); put('glowrgba', await pack(new Uint8Array(L.A.glow.buffer.slice(0))));
     if (b) { put('paint2', await pack(new Uint8Array(L.B.paint.buffer.slice(0)))); put('glowrgba2', await pack(new Uint8Array(L.B.glow.buffer.slice(0)))); }
     if (cut.some(v => v)) put('fincut', await pack(cut));
@@ -978,6 +1023,6 @@
     if (dirtySkin && built) compositeAll();
     drawTank(now); requestAnimationFrame(frame);
   }
-  window.FishLab = { bubbles: () => ({ live: BUB.live, burn: +BUB.burn.toFixed(2), at: BUB.p.filter((q, i) => BUB.a[i] < 0.32).map(q => q.map(v => +v.toFixed(4))) }), fileText, openText, get design() { return D; }, view: () => [yaw, pitch, zoom, panX, panY].map(v => Math.round(v * 100) / 100), sel: () => [tab, selFin, selEye], undo, touch: () => { dirtyShape = true; }, probe: () => { const f = curFin(); return handles().map(h => { const q = to3(pos3(h)), r = q ? finRay(f, q[0], q[1]) : null; return { p: h.p.map(v => +v.toFixed(3)), hgt: +hgtOf(f, h.p).toFixed(3), scr: q && q.map(Math.round), ray: r && [+(+r.z).toFixed(3), +(+r.hgt).toFixed(3), r.ok] }; }); }, packs: () => JSON.stringify(Object.keys(packs).map(k => [+k, packs[k].x0, packs[k].y0, packs[k].w, packs[k].h, packs[k].sc])), finPaint, unpack: s => unpack(s), layers: L, cut, sheet: () => [paintView, SV.zoom, SV.px, SV.py].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v), skinAt: (x, y) => skinAt(x, y) };
+  window.FishLab = { sfins: () => (built.sfins || []).map((q, n) => ({ fin: q.fin, seg: q.seg, flank: q.flank, back: +q.back.toFixed(2), sweep: q.sweep, tris: q.bands.map(b => b.T.length), bend: [0, 1, 2].map(j => sfLocal[n * 3 + j] ? +Math.acos(clamp((sfLocal[n * 3 + j][0] + sfLocal[n * 3 + j][5] + sfLocal[n * 3 + j][10] - 1) / 2, -1, 1)).toFixed(3) : 0) })), bubbles: () => ({ live: BUB.live, burn: +BUB.burn.toFixed(2), at: BUB.p.filter((q, i) => BUB.a[i] < 0.32).map(q => q.map(v => +v.toFixed(4))) }), fileText, openText, get design() { return D; }, view: () => [yaw, pitch, zoom, panX, panY].map(v => Math.round(v * 100) / 100), sel: () => [tab, selFin, selEye], undo, touch: () => { dirtyShape = true; }, probe: () => { const f = curFin(); return handles().map(h => { const q = to3(pos3(h)), r = q ? finRay(f, q[0], q[1]) : null; return { p: h.p.map(v => +v.toFixed(3)), hgt: +hgtOf(f, h.p).toFixed(3), scr: q && q.map(Math.round), ray: r && [+(+r.z).toFixed(3), +(+r.hgt).toFixed(3), r.ok] }; }); }, packs: () => JSON.stringify(Object.keys(packs).map(k => [+k, packs[k].x0, packs[k].y0, packs[k].w, packs[k].h, packs[k].sc])), finPaint, unpack: s => unpack(s), layers: L, cut, sheet: () => [paintView, SV.zoom, SV.px, SV.py].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v), skinAt: (x, y) => skinAt(x, y) };
   requestAnimationFrame(frame);
 })();
