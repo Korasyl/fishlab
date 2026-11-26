@@ -111,6 +111,13 @@
         if (!insidePoly(pts, z, yv)) continue;
         const a = Math.atan2(yv - PY, z - PZ), r = Math.hypot(z - PZ, yv - PY); ang[i] = a; rr[i] = r; ok[i] = 1; const bn = binOf(a); if (r > farR[bn]) farR[bn] = r;
       }
+      // (v0.17) two more rings of dots round the tail belong to it as well: the tail's edge is cut as SHAPE now (the app's crispTail),
+      // and the picture must be solid right up to that edge - otherwise the coarse dots of a long, squeezed tail show as steps
+      for (let pass = 0; pass < 2; pass++) {
+        const grow = [];
+        for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x; if (ok[i] || body[i] || cls[i]) continue; if (ok[i - 1] || ok[i + 1] || ok[i - W] || ok[i + W]) grow.push(i); }
+        grow.forEach(i => { const x = i % W, y = (i - x) / W; ang[i] = Math.atan2(ys[y] - PY, zs[x] - PZ); rr[i] = Math.hypot(zs[x] - PZ, ys[y] - PY); ok[i] = 1; });
+      }
       const far2 = new Float64Array(BIN);
       for (let k = 0; k < BIN; k++) { let s = 0, c = 0; for (let j = -1; j <= 1; j++) { const q = k + j; if (q >= 0 && q < BIN && farR[q] > 0) { s += farR[q]; c++; } } far2[k] = c ? s / c : r0 * 2; }
       for (let i = 0; i < N; i++) if (ok[i]) {

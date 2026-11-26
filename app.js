@@ -1,4 +1,4 @@
-// ARCA FISH LAB v0.16 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.17 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
@@ -162,6 +162,41 @@
     const rip = (0.06 + 0.22 * act) * (0.25 + 0.75 * sweep) * (1 - 0.7 * glide), hold = 0.55 * glide * back - 0.5 * Math.max(0, turnIn) * back;
     return SFW[j] * (flank * (amp * Math.sin(phi - 0.9 * j) + rip * Math.sin(1.5 * phi - 2.1 * j)) + hold);
   }
+  // A CRISP EDGE BEHIND THE BODY (v0.17; the user: "choppiness the larger a tail is ... we have to increase our renderer to compensate").
+  // The flat fin sheet used to be one plain sheet whose fins were cut out by the PICTURE; a long tail's picture is squeezed up to 5 times,
+  // so its edge came out in big steps. Now, behind the body's end, the sheet itself is cut to the tail's outline (and to that of any back
+  // or belly fin that trails past the body): the edge is real shape, smooth at any length. The picture only gives it its colours.
+  function earClip(poly) {
+    let p = poly.filter((q, i) => { const r = poly[(i + 1) % poly.length]; return Math.hypot(q[0] - r[0], q[1] - r[1]) > 1e-7; }); if (p.length < 3) return [];
+    let ar = 0; p.forEach((q, i) => { const r = p[(i + 1) % p.length]; ar += q[0] * r[1] - r[0] * q[1]; }); if (ar < 0) p = p.reverse();
+    const out = [], cr = (a, b, q) => (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]); let guard = 0;
+    while (p.length > 3 && guard++ < 5000) {
+      let done = false;
+      for (let i = 0; i < p.length; i++) { const a = p[(i + p.length - 1) % p.length], b = p[i], c2 = p[(i + 1) % p.length]; if (cr(a, b, c2) <= 1e-14) continue;
+        if (p.some(q => q !== a && q !== b && q !== c2 && cr(a, b, q) > 0 && cr(b, c2, q) > 0 && cr(c2, a, q) > 0)) continue; out.push([a, b, c2]); p.splice(i, 1); done = true; break; }
+      if (!done) { let worst = 0, wv = 1e9; for (let i = 0; i < p.length; i++) { const v = Math.abs(cr(p[(i + p.length - 1) % p.length], p[i], p[(i + 1) % p.length])); if (v < wv) { wv = v; worst = i; } } p.splice(worst, 1); }
+    }
+    if (p.length === 3 && cr(p[0], p[1], p[2]) > 1e-14) out.push(p); return out;
+  }
+  function crispTail() {
+    const k = built.k, zb = Math.max(...D.body.top.map(p => p[0])) * k, c = WARP.c > 1.0001 ? WARP.c : 1, far = z => z > zb ? zb + (z - zb) * c : z, polys = [];
+    if (D.tail && D.tail.pts.length >= 3) polys.push((D.tail.curve ? smooth(D.tail.pts) : D.tail.pts).map(p => [p[0] * k, p[1] * k]));
+    D.fins.forEach(f => { if (offFin(f) || f.pts.length < 3 || !f.pts.some(p => p[0] * k > zb)) return; polys.push((f.curve ? smooth(f.pts) : f.pts).map(p => [far(p[0] * k), p[1] * k])); });
+    const tris = [].concat(...polys.map(earClip)); if (!tris.length) return;
+    const mix = (a, b, t) => ({ p: a.p.map((v, i) => v + (b.p[i] - v) * t), n: a.n, u: a.u.map((v, i) => v + (b.u[i] - v) * t) });
+    const triCut = (poly, fn) => { const out = []; for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length], da = fn(a.p), db = fn(b.p); if (da >= 0) out.push(a); if ((da > 0 && db < 0) || (da < 0 && db > 0)) out.push(mix(a, b, da / (da - db))); } return out; };
+    built.slices.forEach(S => {
+      const keep = [], put = poly => { if (poly.length < 3) return; const ix = poly.map(v => { S.P.push(v.p.slice()); S.N.push(v.n); S.UV.push(v.u); return S.P.length - 1; }); for (let q = 1; q < ix.length - 1; q++) keep.push([ix[0], ix[q], ix[q + 1]]); };
+      S.T.forEach(t => {
+        if (!t.every(i => Math.abs(S.P[i][0]) < 1e-9) || t.every(i => S.P[i][2] <= zb + 1e-9)) { keep.push(t); return; }
+        const tri = t.map(i => ({ p: S.P[i], n: S.N[i], u: S.UV[i] })), zs = tri.map(v => v.p[2]), ys = tri.map(v => v.p[1]), z0 = Math.min(...zs), z1 = Math.max(...zs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+        put(triCut(tri, p => zb - p[2])); const back = triCut(tri, p => p[2] - zb); if (back.length < 3) return;
+        tris.forEach(q => { if (Math.max(q[0][0], q[1][0], q[2][0]) < z0 || Math.min(q[0][0], q[1][0], q[2][0]) > z1 || Math.max(q[0][1], q[1][1], q[2][1]) < y0 || Math.min(q[0][1], q[1][1], q[2][1]) > y1) return;
+          let pg = back; for (let e = 0; e < 3 && pg.length >= 3; e++) { const a = q[e], b = q[(e + 1) % 3]; pg = triCut(pg, p => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[2] - a[0])); } put(pg); });
+      });
+      S.T = keep.filter(t => { const a = S.P[t[0]], b = S.P[t[1]], d = S.P[t[2]], ux = b[1] - a[1], uz = b[2] - a[2], vx = d[1] - a[1], vz = d[2] - a[2]; return Math.abs(a[0]) > 1e-9 || Math.abs(b[0]) > 1e-9 || Math.abs(d[0]) > 1e-9 || Math.abs(ux * vz - uz * vx) > 1e-13; });
+    });
+  }
   function addSideFins() {
     const k = built.k, cuts = built.tables.cut; trimSheet(); built.sfins = [];
     D.fins.forEach((f, i) => {
@@ -212,7 +247,7 @@
       SPAN = WARP.c > 1 ? Math.max(1, tz + 0.03 - WIN.Z0) : 1; VIEWC = WARP.c > 1 ? (Math.min(...D.body.top.map(p => p[0])) + tz) / 2 : 0;
       D.fins.forEach(f => { const e = f.side === 'back' ? top : f.side === 'belly' ? bot : () => 0, a = f.pts[0], b = f.pts[f.pts.length - 1]; a[1] = e(a[0]); b[1] = e(b[0]); });
       B3 = body3();
-      const m = metres(); built = C.build(m.d); built.k = m.k; stretchTail(); packFins(built); addSideFins(); dirtyShape = false; dirtySkin = true;
+      const m = metres(); built = C.build(m.d); built.k = m.k; stretchTail(); crispTail(); packFins(built); addSideFins(); dirtyShape = false; dirtySkin = true;
       if (!D.eyes) { const e = built.tables.eye; D.eyes = D.look.eyeSize > 0.05 ? [{ p: picToDes(e[0], e[1]), size: D.look.eyeSize, type: 'round', col: D.look.eye }] : []; eyeUI(); }
       const t = built.tables; $('facts').textContent = 'About ' + D.lenCm.toFixed(1) + ' cm long. Back fin on ' + t.fin.slice(0, 6).filter(v => v < 50).length + ' of its 6 body sections, belly fin on ' + t.fin.slice(6).filter(v => v < 50).length + '. ' + built.slices.reduce((s, x) => s + x.T.length, 0) + ' triangles.' + (packMiss ? ' ' + packMiss + ' fin(s) found no room in the picture and are not shown.' : '');
       if (packMiss !== missTold) { missTold = packMiss; if (packMiss) say(packMiss + ' fin(s) found no room in the fish\'s picture and are not shown. Press More room on the Shape tab.', true); }
@@ -529,8 +564,12 @@
     lastMats = lastViews[0].mats;
     gl.useProgram(prog); const U = n => gl.getUniformLocation(prog, n); gl.uniform1f(U('dark'), dark); gl.uniform1f(U('gshow'), gshow); gl.uniform1f(U('unlit'), sheet ? 1 : 0);
     gl.uniform1f(U('tp'), 0); render(prog);
+    // (v0.17) see-through fins that overlap: first only their DEPTH is laid down, so that of several see-through layers on one dot the
+    // nearest is known; then the colour is drawn only where a layer IS that nearest one (it used to be whichever piece came first in
+    // the list, so a nearer fin could be cut away by one behind it)
+    gl.useProgram(prog); gl.uniform1f(U('tp'), 1); gl.colorMask(false, false, false, false); render(prog); gl.colorMask(true, true, true, true); gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); gl.enable(gl.STENCIL_TEST); gl.stencilFunc(gl.EQUAL, 0, 0xff); gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);      // the stencil: a dot that has had its see-through layer takes no second one
-    gl.useProgram(prog); gl.uniform1f(U('tp'), 1); render(prog); gl.disable(gl.STENCIL_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.useProgram(prog); gl.uniform1f(U('tp'), 1); render(prog); gl.disable(gl.STENCIL_TEST); gl.depthMask(true); gl.disable(gl.BLEND); gl.depthFunc(gl.LESS);
     if (bubV) bubDraw(bubV.vp, bubV.px); else if (BUB.live) { BUB.live = 0; BUB.a.fill(9); }
     drawHud();
   }
