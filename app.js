@@ -1,4 +1,4 @@
-// ARCA FISH LAB v0.6 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.7 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
@@ -657,21 +657,30 @@
     put('map', await pack(whole.blob)); put('over', await pack(a.over)); if (b) put('over2', await pack(b.over));
     // (v0.6) THE LAYERS (see LAB above): with them the game makes each feature a gene. "feat" lists what this fish has.
     LAB = { A: new Uint8ClampedArray(W * H * 3), P: new Uint8ClampedArray(W * H * 3), M: new Uint8ClampedArray(W * H * 3), E: new Uint8ClampedArray(W * H * 4), C: new Uint8ClampedArray(W * H) };
-    const cutBuild = built; built = whole; composite('A'); built = cutBuild; const lab = LAB; LAB = null; dirtySkin = true; const Q = new Uint8ClampedArray(W * H * 4), eyes = D.eyes || [], u8 = x => new Uint8Array(x.buffer, 0, x.length);
-    if (eyes.length) {      // the plain eye: one dark round eye where the first eye is
-      const q = toPic(eyes[0].p), er = Math.max(1.5, built.tables.eye[2] * eyes[0].size), rc = [20, 24, 28], ic = [58, 64, 70], pc = [0, 0, 0];
-      for (let y = Math.max(0, Math.floor(q[1] - er * 1.3)); y <= Math.min(H - 1, Math.ceil(q[1] + er * 1.3)); y++) for (let x = Math.max(0, Math.floor(q[0] - er * 1.3)); x <= Math.min(W - 1, Math.ceil(q[0] + er * 1.3)); x++) {
-        const i = y * W + x; if (built.cls[i] !== 255) continue; const dx = (x + 0.5 - q[0]) / er, dy = (y + 0.5 - q[1]) / er, dd = Math.hypot(dx, dy); if (dd >= 1.25) continue;
-        const [ring, iris, pup, hl] = eyeParts('round', dx, dy, dd), col = [0, 0, 0]; let al = 0; [[rc, ring], [ic, iris], [pc, pup], [[240, 240, 240], hl]].forEach(([cc, tt]) => { for (let k = 0; k < 3; k++) col[k] = col[k] * (1 - tt) + cc[k] * tt; al = al * (1 - tt) + tt; });
-        if (al > 0.004) { Q[i * 4] = col[0] / al; Q[i * 4 + 1] = col[1] / al; Q[i * 4 + 2] = col[2] / al; Q[i * 4 + 3] = al * 255; }
-      }
-    }
-    const allFins = D.fins.concat(D.tail ? [D.tail] : []), anyCut = cut.some(v => v), feat = ['bodycol', 'fincol'];
-    if (D.look.scales > 0.02) feat.push('scales'); if (allFins.some(f => (f.rays == null ? D.look.rays : f.rays) > 0.02)) feat.push('rays'); if (allFins.some(f => (f.clear || 0) > 0.01)) feat.push('clear');
-    if (anyCut) feat.push('cut'); if (eyes.length) feat.push('eyes'); if (L.A.paint.some((v, i) => (i & 3) === 3 && v > 8)) feat.push('brush'); if (a.any) feat.push('glow');
-    put('feat', feat.join(',')); put('la', await pack(u8(lab.A))); put('lp', await pack(u8(lab.P))); put('lm', await pack(u8(lab.M))); put('lc', await pack(u8(lab.C)));
-    if (eyes.length) { put('le', await pack(u8(lab.E))); put('lq', await pack(u8(Q))); }
-    if (feat.includes('brush')) put('lb', await pack(u8(L.A.paint))); if (a.any) put('lg', await pack(u8(L.A.gimg))); if (anyCut) put('lx', await pack(cut));
+    const cutBuild = built; built = whole; composite('A'); built = cutBuild; const lab = LAB; LAB = null; dirtySkin = true; const eyes = D.eyes || [], u8 = x => new Uint8Array(x.buffer, 0, x.length);
+    // (v0.7) THE EYES, EIGHT WAYS: the first eye / the further eyes, each in its own form or plain round, in its own colours or plain dark.
+    // In the game three genes pick among them: the eyes' colours, their form, and whether the further eyes are there at all.
+    const eyeLayer = (list, ownForm, ownCol) => {
+      const out = new Uint8ClampedArray(W * H * 4), er0 = whole.tables.eye[2];
+      list.forEach(e => {
+        const q = toPic(e.p), er = Math.max(1.5, er0 * e.size), t = ownForm ? e.type : 'round', rc = ownCol ? hex(e.ring || '#14181c') : [20, 24, 28], ic = ownCol ? hex(e.col) : [58, 64, 70], pc = ownCol ? hex(e.pup || '#000000') : [0, 0, 0];
+        for (let y = Math.max(0, Math.floor(q[1] - er * 1.3)); y <= Math.min(H - 1, Math.ceil(q[1] + er * 1.3)); y++) for (let x = Math.max(0, Math.floor(q[0] - er * 1.3)); x <= Math.min(W - 1, Math.ceil(q[0] + er * 1.3)); x++) {
+          const i = y * W + x, o = i * 4; if (whole.cls[i] !== 255) continue; const dx = (x + 0.5 - q[0]) / er, dy = (y + 0.5 - q[1]) / er, dd = Math.hypot(dx, dy); if (dd >= 1.25) continue;
+          const [ring, iris, pup, hl] = eyeParts(t, dx, dy, dd); let al = out[o + 3] / 255; const col = [out[o] * al, out[o + 1] * al, out[o + 2] * al];
+          [[rc, ring], [ic, iris], [pc, pup], [[240, 240, 240], hl]].forEach(([cc, tt]) => { for (let k = 0; k < 3; k++) col[k] = col[k] * (1 - tt) + cc[k] * tt; al = al * (1 - tt) + tt; });
+          if (al > 0.004) { out[o] = col[0] / al; out[o + 1] = col[1] / al; out[o + 2] = col[2] / al; out[o + 3] = al * 255; }
+        }
+      });
+      return out;
+    };
+    // "feat": what this fish has. Names for the general features; s16.. = fin 1.. is there (s27 the tail), s28.. = that fin's own look (s39 the tail's)
+    const anyCut = cut.some(v => v), feat = ['bodycol', 'fincol'], finLook = f => (f.rays == null ? D.look.rays : f.rays) > 0.02 || (f.clear || 0) > 0.01, hasBrush = L.A.paint.some((v, i) => (i & 3) === 3 && v > 8);
+    if (D.look.scales > 0.02) feat.push('scales'); if (anyCut) feat.push('cut'); if (hasBrush) feat.push('brush'); if (a.any) feat.push('glow', 'glowlit');
+    if (eyes.length) feat.push('eyecol'); if (eyes.some(e => e.type !== 'round')) feat.push('eyekind'); if (eyes.length > 1) feat.push('eyemore');
+    D.fins.slice(0, 11).forEach((f, i) => { feat.push('s' + (16 + i)); if (finLook(f)) feat.push('s' + (28 + i)); }); if (D.tail) { feat.push('s27'); if (finLook(D.tail)) feat.push('s39'); }
+    put('feat', feat.join(',')); put('la', await pack(u8(lab.A))); put('lp', await pack(u8(lab.P))); put('lm', await pack(u8(lab.M))); put('lc', await pack(u8(lab.C))); put('lo', await pack(whole.own));
+    for (const more of [0, 1]) for (const form of [0, 1]) for (const colr of [0, 1]) { const list = more ? eyes.slice(1) : eyes.slice(0, 1); if (list.length) put('e' + (more ? 'x' : 'f') + (form ? 'd' : 'p') + (colr ? 'd' : 'p'), await pack(u8(eyeLayer(list, !!form, !!colr)))); }
+    if (hasBrush) put('lb', await pack(u8(L.A.paint))); if (a.any) put('lg', await pack(u8(L.A.gimg))); if (anyCut) put('lx', await pack(cut));
     if (!D.look.glowLit) { put('lit', await pack(a.lit)); if (b) put('lit2', await pack(b.lit)); }
     for (let s = 0; s < 6; s++) put('m' + s, await pack(C.writeMwm(PAT, built.slices[s])));
     D.v = 4; put('design', await pack(new TextEncoder().encode(JSON.stringify(D)))); put('paint', await pack(new Uint8Array(L.A.paint.buffer.slice(0)))); put('glowrgba', await pack(new Uint8Array(L.A.glow.buffer.slice(0))));

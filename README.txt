@@ -1,4 +1,4 @@
-ARCA FISH LAB - the phone app (an installable web app), v0.6.0
+ARCA FISH LAB - the phone app (an installable web app), v0.7.0
 
 What this folder is
   The whole Fish Lab as a web app that a phone can install to its home screen and use with no connection.
