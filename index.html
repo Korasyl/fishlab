@@ -83,7 +83,7 @@ button:disabled{opacity:.45;cursor:default}
 <section aria-label="Tools" id="tools">
   <div class="tabs">
     <button data-tab="shape" aria-pressed="true" data-tip="Sculpt the body: its height and its width along its length.">Shape</button><button data-tab="fins" data-tip="Add and reshape fins and the tail.">Fins</button><button data-tab="look" data-tip="The base colours, scales, fin rays and the eye.">Skin</button>
-    <button data-tab="paint" data-tip="Paint colour and glow onto the fish with a brush.">Paint</button><button data-tab="move" data-tip="How it swims, and the swimming preview.">Motion</button><button data-tab="save" data-tip="Name it, save the file for the game, or open one again.">Save</button>
+    <button data-tab="feat" aria-pressed="false" data-tip="Extras: a vent port, an angler's lure.">Features</button><button data-tab="paint" data-tip="Paint colour and glow onto the fish with a brush.">Paint</button><button data-tab="move" data-tip="How it swims, and the swimming preview.">Motion</button><button data-tab="save" data-tip="Name it, save the file for the game, or open one again.">Save</button>
   </div>
   <div class="pane on" id="p-shape">
     <h2>Body</h2>
@@ -91,6 +91,7 @@ button:disabled{opacity:.45;cursor:default}
     <label>Overall width <output id="o-wide"></output><input type="range" id="wide" min="0.4" max="1.8" step="0.02"></label>
     <label>Length in game <output id="o-len"></output><input type="range" id="len" min="5" max="30" step="0.5"></label>
     <div class="row"><button id="bmirror" aria-pressed="true" data-tip="On: both flanks have the same width. Off: shape the left and right flank separately.">Mirror the two flanks</button><button id="mirror" data-tip="Copies the back line, flipped, to the belly.">Belly like the back</button></div>
+    <label>Body length <output id="o-bodylen"></output><input type="range" id="bodylen" min="15" max="90" step="1" data-tip="Draws the body itself longer or shorter, from the nose. The fins keep their size and move with it; the tail follows the body's end."></label>
     <h2>Room around the fish</h2>
     <p class="hint">For long trailing fins or many fins: draw the fish smaller inside its frame. Its size in the game stays the same; fine detail gets a little coarser.</p>
     <div class="row"><button id="room-more" data-tip="Draws the whole fish smaller in its frame, so there is more room for fins behind and around it.">More room</button><button id="room-less" data-tip="Draws the fish larger again, if nothing would leave the frame.">Less room</button></div>
@@ -103,7 +104,7 @@ button:disabled{opacity:.45;cursor:default}
     <h2>The selected fin</h2>
     <div class="row"><button id="f-curve" data-tip="On: the outline bends smoothly through the handles. Off: straight edges and sharp corners.">Curved outline</button></div>
     <label>Around the body <output id="o-f-ang"></output><input type="range" id="f-ang" min="0" max="25" step="1" data-tip="Where the fin sits around the body. A back or belly fin can move up to 25 degrees off the centre line; a side fin a little up or down the flank."></label>
-    <label>Tilt <output id="o-f-tilt"></output><input type="range" id="f-tilt" min="-60" max="60" step="5" data-tip="Leans a fin that is off the centre line up or down."></label>
+    <div class="row" style="align-items:center;gap:12px"><canvas id="tiltpad" width="132" height="132" style="width:132px;height:132px;touch-action:none;cursor:pointer" role="img" aria-label="The fin's lean" data-tip="Drag the dot to lean the fin: up or down, and toward the head or the tail. Double-tap to stand it straight."></canvas><div><div class="hint" style="margin:0">Lean</div><output id="o-tilt"></output><div style="margin-top:8px"><button id="f-face" data-tip="Turns the view to look straight at the selected fin, so its handles are easy to drag.">Face this fin</button></div></div></div>
     <label>Turn in place <output id="o-f-rot"></output><input type="range" id="f-rot" min="-180" max="180" step="5" data-tip="Turns the fin about its root. At 90 degrees its root runs round the body instead of along it: seen head-on, a side fin then stands up and down."></label>
     <div class="row"><button id="f-mirror" data-tip="On: a fin off the centre line has a twin on the other side. Off: one side only.">Mirror to the other side</button><button id="f-flip" data-tip="Moves a one-sided fin to the other flank.">Other side</button></div>
     <label>See-through <output id="o-f-clear"></output><input type="range" id="f-clear" min="0" max="0.9" step="0.05" data-tip="How much shows through the fin's skin between its rays."></label>
@@ -127,6 +128,18 @@ button:disabled{opacity:.45;cursor:default}
     <div class="row" id="eyetypes"></div>
     <label>Eye size <output id="o-eye"></output><input type="range" id="eye" min="0.3" max="3" step="0.05"></label>
     <div id="pickhome-eye"></div>
+  </div>
+  <div class="pane" id="p-feat">
+    <h2>Features</h2>
+    <p class="hint">Extras the game gives your fish. Each is passed on like its other traits. Here they are only marked on the fish; the game draws them.</p>
+    <h2>Vent ports</h2>
+    <p class="hint">Thruster ports, anywhere on the body. Drag a port on the fish to place it; double-tap the body to add one there, double-tap a port to remove it. Each blows toward the tail.</p>
+    <div class="row" id="ventlist"></div>
+    <div class="row"><button id="ft-addvent" data-tip="Adds a vent port near the tail; drag it where you want it.">Add vent port</button><button id="ft-delvent" data-tip="Removes the selected vent port.">Remove port</button></div>
+    <label>Port size <output id="o-ventsize"></output><input type="range" id="ventsize" min="0.4" max="3" step="0.1" value="1"></label>
+    <h2>Lure</h2>
+    <div class="row"><button id="ft-lure" aria-pressed="false" data-tip="A glowing globe on a stalk before the head, as on an anglerfish.">Angler lure</button></div>
+    <p class="hint" id="feathint"></p>
   </div>
   <div class="pane" id="p-paint">
     <h2>Work window</h2>
