@@ -68,6 +68,7 @@
     // fins: an outline whose first and last points sit on the body (its base). Dots are measured along RAYS that leave the base
     // leaning the way the fin leans: Dm = how far along its ray a dot is (0 base .. 1 tip), Rm = which ray (by where it leaves)
     (d.fins || []).forEach((f, finIndex) => {
+      if (f.off) return;      // (v0.5) a fin off the centre line is not part of the flat fin sheet: the app adds it as its own piece
       const code = f.side === 'back' ? 100 : 140, sign = code === 100 ? 1 : -1, edge = code === 100 ? top : bot, pts = f.pts;
       const a = pts[0], b = pts[pts.length - 1], zs0 = Math.min(a[0], b[0]), ze0 = Math.max(a[0], b[0]), zm = (a[0] + b[0]) / 2, ym = (a[1] + b[1]) / 2;
       let far = 0, tip = pts[0];
@@ -117,6 +118,8 @@
       }
     }
     for (let i = 0; i < N; i++) if (body[i]) { cls[i] = 255; own[i] = 1; }
+    // (v0.5) swatches: strips in the picture's unused margins that hold the look of the fins off the centre line (class 254: painted as skin, always there)
+    (d.swatches || []).forEach(sw => { for (let y = Math.max(0, sw.y0); y <= Math.min(H - 1, sw.y1); y++) for (let x = Math.max(0, sw.x0); x <= Math.min(W - 1, sw.x1); x++) { cls[y * W + x] = 254; own[y * W + x] = sw.own; } });
     const topr = new Float64Array(W), botr = new Float64Array(W);
     for (let c = 0; c < W; c++) {
       const cc = clamp(c, b0, b1); let lo = -1, hi = -1;
@@ -125,7 +128,7 @@
     }
     const ex = b0 + 0.13 * (b1 - b0), ci = Math.floor(ex), ey = topr[ci] + 0.40 * (botr[ci] - topr[ci]), er = Math.max(4.0, 0.075 * (botr[ci] - topr[ci]));
     let deep = 1; for (let c = 0; c < W; c++) deep = Math.max(deep, botr[c] - topr[c]);
-    if (d.cut) for (let i = 0; i < N; i++) if (d.cut[i] && cls[i] && cls[i] !== 255) cls[i] = 0;      // (v0.4) holes and tears cut into the fins; `own` keeps them, so a cut fin can still be picked
+    if (d.cut) for (let i = 0; i < N; i++) if (d.cut[i] && cls[i] && cls[i] < 200) cls[i] = 0;      // (v0.4) holes and tears cut into the fins; `own` keeps them, so a cut fin can still be picked
     const blob = new Uint8Array(3 * N + 2 * W);
     blob.set(cls, 0);
     for (let i = 0; i < N; i++) { blob[N + i] = clamp(Math.floor(Dm[i] * 255), 0, 255); blob[2 * N + i] = clamp(Math.floor(Rm[i] * 255), 0, 255); }

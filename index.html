@@ -96,9 +96,12 @@ button:disabled{opacity:.45;cursor:default}
     <h2>Fins and tail</h2>
     <p class="hint">Tap a fin to select it. Drag the fin itself to slide it along the body, or across to the other edge. Drag its square handles to reshape it; double-tap its outline to add a handle, double-tap a handle to remove it.</p>
     <div class="row" id="finlist"></div>
-    <div class="row"><button id="addback" data-tip="A new fin on the back.">Add back fin</button><button id="addbelly" data-tip="A new fin on the belly.">Add belly fin</button><button id="addtail" data-tip="A tail fin, if the fish has none.">Add tail</button><button id="delfin" data-tip="Removes the selected fin or the tail.">Delete selected</button></div>
+    <div class="row"><button id="addback" data-tip="A new fin on the back.">Add back fin</button><button id="addbelly" data-tip="A new fin on the belly.">Add belly fin</button><button id="addside" data-tip="A pair of side (pectoral) fins on the flanks.">Add side fins</button><button id="addtail" data-tip="A tail fin, if the fish has none.">Add tail</button><button id="delfin" data-tip="Removes the selected fin or the tail.">Delete selected</button></div>
     <h2>The selected fin</h2>
     <div class="row"><button id="f-curve" data-tip="On: the outline bends smoothly through the handles. Off: straight edges and sharp corners.">Curved outline</button></div>
+    <label>Around the body <output id="o-f-ang"></output><input type="range" id="f-ang" min="0" max="25" step="1" data-tip="Where the fin sits around the body. A back or belly fin can move up to 25 degrees off the centre line; a side fin a little up or down the flank."></label>
+    <label>Tilt <output id="o-f-tilt"></output><input type="range" id="f-tilt" min="-60" max="60" step="5" data-tip="Leans a fin that is off the centre line up or down."></label>
+    <div class="row"><button id="f-mirror" data-tip="On: a fin off the centre line has a twin on the other side. Off: one side only.">Mirror to the other side</button><button id="f-flip" data-tip="Moves a one-sided fin to the other flank.">Other side</button></div>
     <label>See-through <output id="o-f-clear"></output><input type="range" id="f-clear" min="0" max="0.9" step="0.05" data-tip="How much shows through the fin's skin between its rays."></label>
     <label>Rays <output id="o-f-rays"></output><input type="range" id="f-rays" min="0" max="1" step="0.05" data-tip="How strongly this fin's rays show."></label>
     <label>Ray spacing <output id="o-f-rayn"></output><input type="range" id="f-rayn" min="0.3" max="3" step="0.1" data-tip="Fewer, wider rays or many fine ones."></label>
