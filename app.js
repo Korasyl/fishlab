@@ -1,10 +1,13 @@
-// ARCA FISH LAB v0.17 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.18 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
 (function () {
   'use strict';
   const C = FishCore, W = C.W, H = C.H, PAT = JSON.parse(document.getElementById('pattern').textContent);
+  // (v0.18) THE SHARPER PICTURE: the skin picture is 1024 x 512 (it was 512 x 256; ARCA v16.95 reads either). The brush and cut sizes
+  // are still told in the old dots, so a size means the same on the fish as before: DOT = new dots for one old dot.
+  const DOT = W / 512, bsz = () => +$('bsize').value * DOT, csz = () => +$('cutsize').value * DOT;
   const YH = 0.92 * H / (0.94 * W) / 2, WIN = { Z0: -0.5, Z1: 0.5, Y0: -YH, Y1: YH, ZS: 1.0 };
   const $ = id => document.getElementById(id), clamp = (x, a, b) => x < a ? a : x > b ? b : x;
   const sm = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -398,7 +401,7 @@
     const hit = tab === 'paint' ? packAt(px, py) : null;
     if (hit) {      // on a fin's patch: the dab goes into that fin's own sheet
       const pk = hit[0], fin = D.fins[hit[1] - 2]; if (!fin) return; const lay = finLay(fin), cx = ((pk.z0 + (px - pk.x0 - 2) / pk.den - pk.zc) / FL.X + 0.5) * FL.W, cy = (1 - ((pk.y0 + pk.h - 2 - py) / pk.den) / FL.Y) * FL.H;
-      const R = Math.max(1, +$('bsize').value / pk.den * FL.W / FL.X), str = +$('bstr').value, bc = hex(brushCol[mode] || '#ffffff');
+      const R = Math.max(1, bsz() / pk.den * FL.W / FL.X), str = +$('bstr').value, bc = hex(brushCol[mode] || '#ffffff');
       for (let yy = Math.max(0, Math.floor(cy - R)); yy <= Math.min(FL.H - 1, Math.ceil(cy + R)); yy++) for (let xx = Math.max(0, Math.floor(cx - R)); xx <= Math.min(FL.W - 1, Math.ceil(cx + R)); xx++) {
         const d = Math.hypot(xx + 0.5 - cx, yy + 0.5 - cy) / R; if (d > 1) continue; const k = str * (1 - sm(d, 0.5, 1.0)) * 0.5, o = (yy * FL.W + xx) * 4;
         if (mode === 'erase') { lay.paint[o + 3] = lay.paint[o + 3] * (1 - k); lay.glow[o + 3] = lay.glow[o + 3] * (1 - k); continue; }
@@ -406,7 +409,7 @@
       }
       dirtySkin = true; return;
     }
-    const m = tab === 'fins' ? 'cut' : mode, K = lay(key), R = m === 'cut' ? +$('cutsize').value : +$('bsize').value, str = +$('bstr').value, bc = hex(brushCol[m] || '#ffffff');
+    const m = tab === 'fins' ? 'cut' : mode, K = lay(key), R = m === 'cut' ? csz() : bsz(), str = +$('bstr').value, bc = hex(brushCol[m] || '#ffffff');
     for (let yy = Math.max(0, Math.floor(py - R)); yy <= Math.min(H - 1, Math.ceil(py + R)); yy++) for (let xx = Math.max(0, Math.floor(px - R)); xx <= Math.min(W - 1, Math.ceil(px + R)); xx++) {
       const d = Math.hypot(xx + 0.5 - px, yy + 0.5 - py) / R; if (d > 1) continue; const i = yy * W + xx; if (!built || !built.cls[i] || built.cls[i] === 254) continue;
       if (m === 'cut') { if (built.own[i] >= 2 && !cut[i]) { cut[i] = 1; cutHit = true; } continue; }
@@ -418,7 +421,7 @@
   }
   function strokeStart() { remember(true); if (tab === 'paint' && mode !== 'erase') { const c = brushCol[mode], i = recent.indexOf(c); if (i >= 0) recent.splice(i, 1); recent.unshift(c); if (recent.length > 10) recent.pop(); drawPalette(); } }
   function strokeTo(st, key, px, py) {
-    if (st.last && st.key === key && Math.hypot(px - st.last[0], py - st.last[1]) < 60) { const n = Math.max(1, Math.ceil(Math.hypot(px - st.last[0], py - st.last[1]) / Math.max(1, (tab === 'fins' ? +$('cutsize').value : +$('bsize').value) * 0.3))); for (let k = 1; k <= n; k++) dab(key, st.last[0] + (px - st.last[0]) * k / n, st.last[1] + (py - st.last[1]) * k / n); }
+    if (st.last && st.key === key && Math.hypot(px - st.last[0], py - st.last[1]) < 60 * DOT) { const n = Math.max(1, Math.ceil(Math.hypot(px - st.last[0], py - st.last[1]) / Math.max(1, (tab === 'fins' ? csz() : bsz()) * 0.3))); for (let k = 1; k <= n; k++) dab(key, st.last[0] + (px - st.last[0]) * k / n, st.last[1] + (py - st.last[1]) * k / n); }
     else dab(key, px, py);
     st.last = [px, py]; st.key = key;
   }
@@ -614,7 +617,7 @@
     if (sheet) {
       hx.fillStyle = '#86a9b3'; hx.font = Math.round(12 * sc) + 'px sans-serif'; lastViews.forEach(v => hx.fillText(v.label, 10 * sc, hud.height - v.y - v.h + 18 * sc));
       const my = hud.height - lastViews[0].y; hx.strokeStyle = '#24424d'; hx.lineWidth = sc; hx.beginPath(); hx.moveTo(0, my); hx.lineTo(hud.width, my); hx.stroke();
-      brush(+$('bsize').value / (0.94 * W) * SV.zoom / 0.52 / SPAN * hud.width / 2); return;
+      brush(bsz() / (0.94 * W) * SV.zoom / 0.52 / SPAN * hud.width / 2); return;
     }
     if (tab === 'paint') brush(+$('bsize').value * sc * 1.2 / zoom);
     if (tab === 'fins' && cutting) brush(+$('cutsize').value * sc * 1.2 / zoom);
@@ -1032,10 +1035,12 @@
     remember(true); const f = fresh(); D = Object.assign(f, d); D.look = Object.assign(fresh().look, d.look); D.body = Object.assign(fresh().body, d.body); if (!Array.isArray(D.palette)) D.palette = fresh().palette; if (typeof D.skinMirror !== 'boolean') D.skinMirror = true; D.features = Object.assign({ vents: [], lure: false }, d.features || {}); if (!Array.isArray(D.features.vents)) D.features.vents = []; if (D.features.vent && !D.features.vents.length) { const zs = D.body.top.map(q => q[0]), z1 = Math.max(...zs); D.features.vents.push({ p: [z1 - 0.03, 0], size: 1 }); } delete D.features.vent; selVent = 0; if (!Array.isArray(D.eyes)) D.eyes = null;
     if (!d.body.width) { const t = C.curve(d.body.top), b = C.curve(d.body.bot), w0 = d.body.wide || 0.7; D.body.width = d.body.top.map(p => [p[0], Math.max(0.004, w0 * (t(p[0]) - b(p[0])) / 2)]); D.body.wide = 1.0; D.body.widthL = null; }
     ['A', 'B'].forEach(k => { L[k].paint.fill(0); L[k].glow.fill(0); }); cut.fill(0); for (const id in finPaint) delete finPaint[id];
-    const load = async (key, arr) => { if (kv[key]) { const p = await unpack(kv[key]); if (p.length === arr.length) arr.set(p); } };
+    // (v0.18) a layer saved by an older Lab (512 x 256) is spread over the sharper picture: every old dot becomes 2 x 2 new ones
+    const fitOld = (p, n) => { if (p.length === n) return p; if (p.length * 4 !== n || n % (W * H)) return null; const ch = n / (W * H), w2 = W / 2, o = new Uint8Array(n); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const a = ((y >> 1) * w2 + (x >> 1)) * ch, b = (y * W + x) * ch; for (let q = 0; q < ch; q++) o[b + q] = p[a + q]; } return o; };
+    const load = async (key, arr) => { if (kv[key]) { const p = fitOld(await unpack(kv[key]), arr.length); if (p) arr.set(p); } };
     await load('paint', L.A.paint); await load('paint2', L.B.paint); await load('glowrgba', L.A.glow); await load('glowrgba2', L.B.glow); await load('fincut', cut); for (const fn of D.fins) if (fn.id && kv['fp.' + fn.id]) { const lay = finLay(fn); await load('fp.' + fn.id, lay.paint); await load('fg.' + fn.id, lay.glow); }
     // a file from before v0.4: its glow was one number per dot. v0.3 kept the glow's colour in the paint; the first version had one glow colour.
-    const old = async (key, K) => { if (!kv[key] || kv.glowrgba) return; const g = await unpack(kv[key]); if (g.length !== W * H) return; const gc = d.look.glow && !d.v ? hex(d.look.glow) : null; for (let i = 0; i < W * H; i++) if (g[i]) { const o = i * 4; for (let c = 0; c < 3; c++) K.glow[o + c] = gc ? gc[c] : K.paint[o + c]; K.glow[o + 3] = g[i]; } };
+    const old = async (key, K) => { if (!kv[key] || kv.glowrgba) return; const g = fitOld(await unpack(kv[key]), W * H); if (!g) return; const gc = d.look.glow && !d.v ? hex(d.look.glow) : null; for (let i = 0; i < W * H; i++) if (g[i]) { const o = i * 4; for (let c = 0; c < 3; c++) K.glow[o + c] = gc ? gc[c] : K.paint[o + c]; K.glow[o + 3] = g[i]; } };
     await old('glowlayer', L.A); await old('glowlayer2', L.B);
     D.v = 4; selFin = 0; selEye = 0; syncAll(); dirtyShape = true;
   }

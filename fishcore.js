@@ -5,7 +5,7 @@
 // It follows tools/fishnew17.py build() (the builder the built-in species were made with) in every number the plugin reads.
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.FishCore = factory(); })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  const W = 512, H = 256, FR = [0.30, 0.44, 0.58, 0.72, 0.86], OV = 0.035;
+  const W = 1024, H = 512, FR = [0.30, 0.44, 0.58, 0.72, 0.86], OV = 0.035;
   const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
 
   // ---- a smooth line through points [[z, y], ...] (z rising): y at any z ----
