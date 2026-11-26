@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ARCA Fish Lab</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0c1a20">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fish Lab">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* One visual world, by choice: a dim wet-lab bench. Layout: tool rail left, ONE work window right (the 3D fish; on the Paint tab it can show flat views instead); one column on a phone. */
+:root{color-scheme:dark;--ink:#d9edf2;--dim:#86a9b3;--bench:#0c1a20;--panel:#12262e;--line:#24424d;--glow:#ffb347;--live:#48d1c4;--bad:#ff7b6b;
+ --display:"Chakra Petch","Trebuchet MS",sans-serif;--body:"IBM Plex Sans","Segoe UI",sans-serif}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bench);color:var(--ink);font:14px/1.45 var(--body);display:flex;flex-direction:column}
+header{padding-top:max(8px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{font:600 18px var(--display);letter-spacing:.06em;margin:0;color:var(--glow)}
+header .sub{color:var(--dim);font-size:13px;flex:1;min-width:120px}
+main{flex:1;min-height:0;display:grid;grid-template-columns:300px minmax(0,1fr);gap:12px;padding:12px 16px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:0;display:flex;flex-direction:column;min-height:0}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px}
+button{font:500 13px var(--body);color:var(--ink);background:#183640;border:1px solid var(--line);border-radius:4px;padding:7px 9px;cursor:pointer;min-height:32px}
+button:hover{border-color:var(--live)}
+button:focus-visible,input:focus-visible,canvas:focus-visible{outline:2px solid var(--glow);outline-offset:1px}
+button[aria-pressed="true"]{background:var(--live);color:#062026;border-color:var(--live)}
+button.go{background:var(--glow);color:#2a1700;border-color:var(--glow)}
+button.warn{background:var(--bad);color:#2b0700;border-color:var(--bad)}
+.pane{padding:4px 12px 12px;overflow:auto;flex:1;display:none}
+.pane.on{display:block}
+h2{font:600 13px var(--display);letter-spacing:.08em;color:var(--dim);margin:12px 0 6px;text-transform:uppercase}
+label{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin:6px 0;font-size:13px}
+input[type=range]{width:100%;grid-column:1/-1;accent-color:var(--live);min-height:24px}
+input[type=text]{background:#0c1a20;border:1px solid var(--line);color:var(--ink);border-radius:4px;padding:6px 8px;font:14px var(--body);min-width:0}
+label>input[type=text]{grid-column:1/-1}
+output{font-variant-numeric:tabular-nums;color:var(--live)}
+p.hint{color:var(--dim);font-size:12.5px;margin:6px 0}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;align-items:center}
+.sw{width:44px;height:28px;min-height:28px;padding:0;border-radius:4px;border:1px solid var(--line)}
+.sw[aria-pressed="true"]{outline:2px solid var(--glow);outline-offset:1px}
+#picker{border:1px solid var(--line);border-radius:6px;padding:8px;margin:8px 0;background:#0e2027}
+#sv{width:100%;height:130px;border-radius:4px;touch-action:none;cursor:crosshair;display:block}
+#hue{width:100%;height:22px;border-radius:4px;touch-action:none;cursor:ew-resize;display:block;margin-top:6px}
+#pal,#recent{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+#pal .sw,#recent .sw{width:30px;height:30px;min-height:30px}
+#stage{position:relative;flex:1;min-height:240px;margin:8px 8px 0;border-radius:4px;overflow:hidden;background:#061016}
+#stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#hud{touch-action:none;cursor:grab}
+.bar{display:flex;gap:6px;align-items:center;padding:8px;flex-wrap:wrap}
+.bar span{color:var(--dim);font-size:12.5px;margin-left:auto}
+#status{color:var(--dim);font-size:12.5px;padding:0 10px 8px;min-height:26px}
+#status.bad{color:var(--bad)}
+.sheet{width:100%;aspect-ratio:2/1;background:#081318;border-radius:4px;touch-action:none;cursor:crosshair;display:block}
+.sheetwrap{padding:8px 8px 0}
+.sheetwrap h3{font:500 12px var(--body);color:var(--dim);margin:0 0 4px}
+#sheets{overflow:auto;flex:1}
+ol{margin:6px 0;padding-left:18px;color:var(--dim);font-size:12.5px}
+code{color:var(--ink);background:#0c1a20;padding:1px 4px;border-radius:3px;font-size:12px;word-break:break-all}
+#tip{position:fixed;z-index:30;max-width:240px;background:#f2e3c4;color:#1d1300;border-radius:4px;padding:6px 8px;font-size:12.5px;pointer-events:none;display:none}
+#tour{position:fixed;inset:0;z-index:40;display:none}
+#tourbox{position:fixed;border:2px solid var(--glow);border-radius:6px;box-shadow:0 0 0 4000px rgba(3,10,13,.72);pointer-events:none}
+#tourcard{position:fixed;background:var(--panel);border:1px solid var(--glow);border-radius:6px;padding:12px;max-width:380px;width:calc(100% - 32px);max-height:calc(100% - 24px);overflow:auto}
+#tourcard h2{margin-top:0;color:var(--glow)}
+#tourall{width:100%;background:#0c1a20;border:1px solid var(--line);color:var(--ink);border-radius:4px;padding:6px 8px;font:13px/1.4 var(--body);resize:vertical}
+.vb{display:contents}.vb[hidden]{display:none}
+button:disabled{opacity:.45;cursor:default}
+@media (max-width:980px){header .sub{display:none}header h1{flex:1}main{grid-template-columns:minmax(0,1fr);overflow:visible;padding:10px 12px}html,body{height:auto}body{display:block}
+ main>section:nth-child(2){order:-1}#stage{flex:none;height:min(60vh,80vw);min-height:260px}.pane,#sheets{overflow:visible}button{min-height:40px;padding:9px 11px}.sw{height:36px;min-height:36px}#pal .sw,#recent .sw{width:38px;height:38px;min-height:38px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header><h1>ARCA FISH LAB</h1><span class="sub">Shape a fish, paint it, watch it swim, save it for the aquarium.</span>
+<button id="undo" data-tip="Take back the last change: a moved handle, a brush stroke, anything. Ctrl+Z does the same.">Undo</button><button id="tourbtn" data-tip="A short walk through the whole app.">Tutorial</button></header>
+<main>
+<section aria-label="Tools" id="tools">
+  <div class="tabs">
+    <button data-tab="shape" aria-pressed="true" data-tip="Sculpt the body: its height and its width along its length.">Shape</button><button data-tab="fins" data-tip="Add and reshape fins and the tail.">Fins</button><button data-tab="look" data-tip="The base colours, scales, fin rays and the eye.">Skin</button>
+    <button data-tab="paint" data-tip="Paint colour and glow onto the fish with a brush.">Paint</button><button data-tab="move" data-tip="How it swims, and the swimming preview.">Motion</button><button data-tab="save" data-tip="Name it, save the file for the game, or open one again.">Save</button>
+  </div>
+  <div class="pane on" id="p-shape">
+    <h2>Body</h2>
+    <p class="hint">Tap any part of the fish to select it. Drag a handle to reshape. Double-tap the highlighted line to add a handle; double-tap a handle to remove it.</p>
+    <label>Overall width <output id="o-wide"></output><input type="range" id="wide" min="0.4" max="1.8" step="0.02"></label>
+    <label>Length in game <output id="o-len"></output><input type="range" id="len" min="5" max="30" step="0.5"></label>
+    <div class="row"><button id="bmirror" aria-pressed="true" data-tip="On: both flanks have the same width. Off: shape the left and right flank separately.">Mirror the two flanks</button><button id="mirror" data-tip="Copies the back line, flipped, to the belly.">Belly like the back</button></div>
+  </div>
+  <div class="pane" id="p-fins">
+    <h2>Fins and tail</h2>
+    <p class="hint">Tap a fin to select it. Drag the fin itself to slide it along the body, or across to the other edge. Drag its square handles to reshape it; double-tap its outline to add a handle, double-tap a handle to remove it.</p>
+    <div class="row" id="finlist"></div>
+    <div class="row"><button id="addback" data-tip="A new fin on the back.">Add back fin</button><button id="addbelly" data-tip="A new fin on the belly.">Add belly fin</button><button id="addtail" data-tip="A tail fin, if the fish has none.">Add tail</button><button id="delfin" data-tip="Removes the selected fin or the tail.">Delete selected</button></div>
+    <h2>The selected fin</h2>
+    <div class="row"><button id="f-curve" data-tip="On: the outline bends smoothly through the handles. Off: straight edges and sharp corners.">Curved outline</button></div>
+    <label>See-through <output id="o-f-clear"></output><input type="range" id="f-clear" min="0" max="0.9" step="0.05" data-tip="How much shows through the fin's skin between its rays."></label>
+    <label>Rays <output id="o-f-rays"></output><input type="range" id="f-rays" min="0" max="1" step="0.05" data-tip="How strongly this fin's rays show."></label>
+    <label>Ray spacing <output id="o-f-rayn"></output><input type="range" id="f-rayn" min="0.3" max="3" step="0.1" data-tip="Fewer, wider rays or many fine ones."></label>
+    <h2>Holes and tears</h2>
+    <div class="row"><button id="f-cut" data-tip="On: dragging across a fin cuts it away. Dab for a hole, drag in from the edge for a tear. Cuts stay where they are if the fin is moved later.">Cut</button><button id="f-mend" data-tip="Fills every hole and tear in the selected fin again.">Mend this fin</button></div>
+    <label>Cut size <output id="o-cutsize"></output><input type="range" id="cutsize" min="1" max="16" step="1" value="3"></label>
+  </div>
+  <div class="pane" id="p-look">
+    <h2>Base colours</h2>
+    <p class="hint">Tap a colour to change it.</p>
+    <div class="row" id="lookrow"></div>
+    <div id="pickhome-look"></div>
+    <label>Scales <output id="o-scales"></output><input type="range" id="scales" min="0" max="1" step="0.05"></label>
+    <h2>Eyes</h2>
+    <p class="hint">Drag an eye on the fish to move it. Double-tap the body to add an eye there; double-tap an eye to remove it.</p>
+    <div class="row" id="eyelist"></div>
+    <div class="row"><button id="addeye" data-tip="Adds another eye beside the last one.">Add eye</button><button id="deleye" data-tip="Removes the selected eye.">Remove eye</button><button class="sw" id="eyecol" aria-label="Eye colour" data-tip="The selected eye's colour."></button></div>
+    <div class="row" id="eyetypes"></div>
+    <label>Eye size <output id="o-eye"></output><input type="range" id="eye" min="0.3" max="3" step="0.05"></label>
+    <div id="pickhome-eye"></div>
+  </div>
+  <div class="pane" id="p-paint">
+    <h2>Work window</h2>
+    <div class="row" id="paintviews"><button id="pv-3d" aria-pressed="true" data-tip="Paint on the turning 3D fish.">3D fish</button><button id="pv-lr" data-tip="Two flat pictures: the left side and the right side.">Flat: left and right</button><button id="pv-tb" data-tip="Two flat pictures: from above and from below.">Flat: top and bottom</button></div>
+    <h2>Brush</h2>
+    <div class="row"><button data-mode="colour" aria-pressed="true" data-tip="Paints colour.">Colour</button><button data-mode="glow" data-tip="Paints a colour that glows. Each stroke can glow in its own colour.">Glow</button><button data-mode="erase" data-tip="Rubs out paint and glow, back to the base skin.">Erase</button></div>
+    <div id="pickhome-paint"></div>
+    <label>Size <output id="o-bsize"></output><input type="range" id="bsize" min="1" max="40" step="1" value="8"></label>
+    <label>Strength <output id="o-bstr"></output><input type="range" id="bstr" min="0.05" max="1" step="0.05" value="0.6"></label>
+    <div class="row"><button id="smirror" aria-pressed="true" data-tip="On: one skin for both sides. Off: the left and right side are painted separately.">Same skin on both sides</button><button id="glowlit" aria-pressed="true" data-tip="On: the glow marks always show. Off: they are hidden until the light goes out (Motion tab, Lights off). You still see them while you paint with the Glow brush.">Always glow</button></div>
+    <div class="row"><button id="clearpaint" data-tip="Removes all painted colour. Asks first.">Clear paint</button><button id="clearglow" data-tip="Removes all glow. Asks first.">Clear glow</button></div>
+  </div>
+  <div class="pane" id="p-move">
+    <h2>Swimming</h2>
+    <label>Tail beat strength <output id="o-wag"></output><input type="range" id="wag" min="0.2" max="2" step="0.05"></label>
+    <label>Swimming pace <output id="o-pace"></output><input type="range" id="pace" min="0.3" max="1.6" step="0.05"></label>
+    <h2>Preview</h2>
+    <div class="row"><button id="v-swim" aria-pressed="true" data-tip="Swim, or hold nearly still.">Swim</button><button id="v-turn" data-tip="Add slow turns left and right.">Turning</button><button id="v-dark" data-tip="Switch the tank light off. Glow marks that are not set to Always glow only show now.">Lights off</button><button id="v-spin" aria-pressed="true" data-tip="Turn the view slowly by itself.">Turntable</button></div>
+    <p class="hint">The body bends at five hinges, as it does in the game.</p>
+  </div>
+  <div class="pane" id="p-save">
+    <h2>Name</h2>
+    <label><input type="text" id="name" maxlength="24" autocomplete="off"></label>
+    <div class="row"><button class="go" id="savefile" data-tip="Saves the fish as one file for the game. The same file opens here again.">Save fish file</button><button id="openbtn" data-tip="Open a fish file saved here before.">Open a fish file</button><input type="file" id="openfile" accept=".txt" hidden></div>
+    <div class="row"><button id="newfish" data-tip="Start over with the starter fish. Asks first.">New fish</button></div>
+    <h2>In the tank</h2><p class="hint" id="facts"></p>
+    <h2>Getting it into the game</h2>
+    <ol><li>Save the file.</li><li>Put it in <code>%AppData%\SpaceEngineers\ArcaBridge\species</code></li><li>In the ARCA console type <code>fish species</code>, or restart the game.</li></ol>
+  </div>
+</section>
+<section aria-label="3D workspace">
+  <div id="stage"><canvas id="tank" width="1100" height="700"></canvas><canvas id="hud" width="1100" height="700" tabindex="0" aria-label="The fish in 3D"></canvas></div>
+  <div class="bar"><div class="vb" id="viewbtns"><button id="v-front" data-tip="Look at its left side.">Left</button><button id="v-right" data-tip="Look at its right side.">Right</button><button id="v-top" data-tip="Look down on it.">Top</button><button id="v-34" data-tip="Look from in front and to one side.">Angle</button></div><button id="z-in" data-tip="Closer. Scroll or pinch does the same.">Zoom +</button><button id="z-out" data-tip="Farther away.">Zoom -</button><span id="stagehint"></span></div>
+  <div id="status" role="status"></div>
+</section>
+</main>
+<div id="picker" hidden>
+  <div class="row" style="margin-top:0"><span id="pickname" style="flex:1;color:var(--dim);font-size:12.5px"></span><input type="text" id="hex" maxlength="7" size="8" aria-label="Colour as a hex code" autocomplete="off"></div>
+  <canvas id="sv" width="240" height="130" aria-label="Shade and brightness"></canvas><canvas id="hue" width="240" height="22" aria-label="Hue"></canvas>
+  <h2>Saved colours</h2><div id="pal"></div><p class="hint">Tap + to save the current colour. Double-tap a saved colour to remove it.</p>
+  <h2>Recently used</h2><div id="recent"></div>
+</div>
+<div id="tip" role="tooltip"></div>
+<div id="tour" role="dialog" aria-modal="true" aria-label="Tutorial"><div id="tourbox"></div><div id="tourcard"><h2 id="tourtitle"></h2><p id="tourtext" style="margin:6px 0 10px"></p><div class="row"><button id="tourback">Back</button><button class="go" id="tournext">Next</button><button id="tourskip" style="margin-left:auto">Close</button></div>
+<div class="row"><button id="touredit" data-tip="Rewrite the words of this tutorial.">Edit the text</button></div>
+<div id="toureditor" hidden><p class="hint">Every step is a title line, then its text. Steps are separated by a line of three dashes. Keep the number of steps the same.</p><textarea id="tourall" rows="9" spellcheck="true" aria-label="All tutorial text"></textarea><div class="row"><button class="go" id="tourapply">Apply</button><button id="tourcopy">Copy all</button><button id="tourreset">Original text</button></div><p class="hint" id="tourmsg"></p></div></div></div>
+<script id="pattern" type="application/json">{"hdr": "BURlYnVnAQAAABBWZXJzaW9uOjAxMTU3MDAy", "idx": ["Dummies", "Vertices", "Normals", "TexCoords0", "Binormals", "Tangents", "TexCoords1", "BlendIndices", "BlendWeights", "ModelBvh", "MeshParts", "RescaleFactor", "UseChannelTextures", "BoundingBox", "BoundingSphere", "SwapWindingOrder", "Sections", "ModelInfo", "Animations", "Bones", "BoneMapping", "HavokCollisionGeometry", "PatternScale", "LODs", "FBXHash", "XMLHash"], "order": ["Dummies", "Vertices", "Normals", "TexCoords0", "Binormals", "Tangents", "TexCoords1", "BlendIndices", "BlendWeights", "ModelBvh", "MeshParts", "RescaleFactor", "UseChannelTextures", "BoundingBox", "BoundingSphere", "SwapWindingOrder", "Sections", "ModelInfo", "Animations", "Bones", "BoneMapping", "HavokCollisionGeometry", "PatternScale", "LODs", "FBXHash", "XMLHash"], "kept": {"TexCoords1": "AAAAAA==", "BlendIndices": "AAAAAA==", "BlendWeights": "AAAAAA==", "ModelBvh": "BAMAABsAAACFY1C/ivOPvylvhb/wZJs/VyqFPylvhT8FdfxGI33sRgiS9UYBAAAA5f///zt+P3bJesSBwIk2hQEAAAD1////O34Wfcl6xIHAiTaFAQAAAPn///9ifpaCtHudgcCJUoQBAAAA/f///2J+loI4gJ2BwIlShAQAAAAKAAAAHQAAAB4AAAApAAAA1X44hjiAKoHAiQaDBAAAAAwAAAALAAAAKgAAACsAAABifpaCGYGdgc+HUoQBAAAA/f///2J+loK0e52BwIkGgwQAAAA8AAAAPQAAABwAAAA7AAAA1X44hr19KoHAiQaDBAAAAAAAAAABAAAAHwAAACAAAABifpaCtHudgW+GQoEBAAAA/f///zt+Fn3JesSBcoU2hQYAAAAxAAAAMgAAADkAAAASAAAAEwAAABoAAAA7fuF9AYHEgXKFNoUGAAAAEAAAABEAAAA6AAAALwAAADAAAAAbAAAAO34Wfcl6xIGSgxmBAQAAAPH///87fj9233rEgWF/NoUBAAAA+f///zt+InrfesSBYX82hQEAAAD9////O34iegGBxIFhfzaFBQAAAA8AAAAUAAAAFwAAABgAAAAZAAAAAIAiegGBxIFhfzaFBQAAADcAAAA4AAAALgAAADMAAAA2AAAAO34iegGBAIBhfzaFAQAAAP3///87fnx633rEgeF9PIEEAAAALQAAAA4AAAANAAAALAAAADt+fHpsfsSB4X08gQQAAAA0AAAAFQAAABYAAAA1AAAAO36Get96xIHhfQGBAQAAAPn///9ifz92336dgIV6B4QBAAAA/f///2J/P3Y8gZ2AhXoHhAQAAAAhAAAACAAAACYAAAAnAAAAYn8/djyBnYCFegeEBAAAAAcAAAACAAAAJQAAAAYAAAAAgD92PIGdgIV6B4QBAAAA/f///2J/P3bffp2AhXqVgQQAAAAoAAAABQAAACIAAAADAAAAYn8/dt9+nYCFepWBBAAAAAkAAAAkAAAABAAAACMAAABifz92336dgIV6lYE=", "RescaleFactor": "CtcjPA==", "UseChannelTextures": "AA==", "SwapWindingOrder": "AA==", "Animations": "AAAAAAIAAAAAAAAAAQAAAA==", "Bones": "AgAAAAhSb290Tm9kZf////8AAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/DW5ld0Zpc2hNb2RlbDkAAAAAgQUgPgAAAAAAAAAAAAAAAAAAAACMtOqxgQUgvgAAAAAAAAAAgQUgPoy06rEAAAAAAAAAAAAAAAAAAAAAAACAPw==", "BoneMapping": "AAAAAA==", "PatternScale": "AACAPw==", "FBXHash": "f5nEBXHxa5E/JBGEHywDBw==", "XMLHash": "UL44BCeAp2qxWSxMs1BNOwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}, "mat": "AQRGaXNoAgAAABFDb2xvck1ldGFsVGV4dHVyZSFUZXh0dXJlc1xNb2RlbHNcQ3ViZXNcRmlzaF9jbS5kZHMQQWxwaGFtYXNrVGV4dHVyZShUZXh0dXJlc1xNb2RlbHNcQ3ViZXNcRmlzaF9hbHBoYW1hc2suZGRzAAAAAAxBTFBIQV9NQVNLRUQ=", "h": -1118073211}</script>
+<script>window.FISHLAB_MOBILE = true; if ('serviceWorker' in navigator) addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => { }); });</script>
+<script src="fishcore.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
