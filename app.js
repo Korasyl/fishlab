@@ -1,4 +1,4 @@
-// ARCA FISH LAB v0.8 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.9 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
@@ -39,13 +39,16 @@
   // Such a fin is its own flat piece standing out of the skin, fixed to the body section under it. Its look comes from the fin
   // settings, kept in a strip in the picture's unused margin (a "swatch"); up to four of them (a mirrored pair counts once).
   const ZONE = { back: [0, 25], belly: [0, 25], side: [-18, 18] }, SLOTS = [{ x0: 1, y0: 16, x1: 12, y1: 239, vert: true }, { x0: 499, y0: 16, x1: 510, y1: 239, vert: true }, { x0: 16, y0: 1, x1: 495, y1: 7 }, { x0: 16, y0: 248, x1: 495, y1: 254 }];
-  const offFin = f => !!f && f !== D.tail && (f.side === 'side' || Math.abs(f.ang || 0) > 0.5);
+  // (v0.9) a fin TURNED in place (f.rot, about the line straight out of the skin at its root) is a piece of its own too, even on the centre line;
+  // there it has no twin (single). Up to MAXFINS fins a fish, the tail not counted.
+  const MAXFINS = 16, single = f => f.side !== 'side' && Math.abs(f.ang || 0) < 0.5;
+  const offFin = f => !!f && f !== D.tail && (f.side === 'side' || Math.abs(f.ang || 0) > 0.5 || Math.abs(f.rot || 0) > 0.5);
   // (v0.8) PAINTING ON THESE FINS. Each fin off the centre line gets a patch of its own in the fish's picture: a free rectangle is
   // looked for wherever the main drawing leaves room (packFins), as large as fits (full sharpness down to about a fifth). The fin lies
   // flat in its patch (along the body = across, out of the skin = up). What is painted on it is kept with the fin, in a small sheet of
   // its own measured from the middle of its root (finPaint, FL) - so the paint stays put when the fin slides or the patch moves.
   // A fin that finds no room falls back to a strip in the margin (swMap) and cannot be painted.
-  const FL = { W: 128, H: 96, X: 0.4, Y: 0.3 }, finPaint = {}; let packs = {};
+  const FL = { W: 128, H: 96, X: 0.4, Y: 0.3 }, finPaint = {}; let packs = {}, packMiss = 0, missTold = 0;
   const finLay = f => { if (!f.id) f.id = Math.random().toString(36).slice(2, 9); return finPaint[f.id] || (finPaint[f.id] = { paint: new Uint8ClampedArray(FL.W * FL.H * 4), glow: new Uint8ClampedArray(FL.W * FL.H * 4) }); };
   const flIndex = (dz, hg) => { const lx = Math.floor((dz / FL.X + 0.5) * FL.W), ly = Math.floor((1 - hg / FL.Y) * FL.H); return lx < 0 || ly < 0 || lx >= FL.W || ly >= FL.H ? -1 : (ly * FL.W + lx) * 4; };
   const packAt = (px, py) => { for (const k in packs) { const p = packs[k]; if (px >= p.x0 && px < p.x0 + p.w && py >= p.y0 && py < p.y0 + p.h) return [p, +k]; } return null; };
@@ -56,7 +59,7 @@
     for (const k in swMap) { const w = swMap[k]; for (let y = w.y0 - 1; y <= w.y1 + 1; y++) for (let x = w.x0 - 1; x <= w.x1 + 1; x++) put(x, y, +k); }
   }
   function packFins(b) {
-    packs = {}; swMap = {}; const DEN = 0.94 * W, occ = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) occ[i] = b.own[i] ? 1 : 0; let slot = 0;
+    packs = {}; swMap = {}; packMiss = 0; const DEN = 0.94 * W, occ = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) occ[i] = b.own[i] ? 1 : 0; let slot = 0;
     D.fins.forEach((f, i) => {
       if (!offFin(f) || f.pts.length < 3) return;
       const ol = f.curve ? smooth(f.pts) : dense(f.pts), a = f.pts[0], e = f.pts[f.pts.length - 1], zc = (a[0] + e[0]) / 2, poly = ol.map(p => [p[0], Math.max(0, hgtOf(f, p))]);
@@ -70,6 +73,7 @@
       }
       if (pk) { packs[2 + i] = pk; const only = packs, one = {}; one[2 + i] = pk; packs = one; const keepSw = swMap; swMap = {}; stampPacks(b, occ); packs = only; swMap = keepSw; }
       else if (slot < SLOTS.length) { const one = {}; one[2 + i] = SLOTS[slot++]; const keepP = packs, keepSw = swMap; packs = {}; swMap = one; stampPacks(b, occ); packs = keepP; swMap = keepSw; swMap[2 + i] = one[2 + i]; }
+      else packMiss++;
     });
   }
   let B3 = null, swMap = {};      // B3: the body's curves (made at every rebuild); swMap: fin's owner code -> its swatch strip
@@ -79,12 +83,18 @@
   const fromHgt = (f, z, h) => f.side === 'back' ? B3.top(z) + h : f.side === 'belly' ? B3.bot(z) - h : h;
   // a point of such a fin in 3D (drawing-frame units): s = which flank (+1 right, -1 left), z = along the body, hgt = how far out of the skin
   function finPt(f, s, z, hgt) {
+    // turned: the root no longer runs along the body but at an angle to it - at 90 degrees straight round the body (seen head-on: up and down)
+    const rot = (f.rot || 0) * Math.PI / 180; if (Math.abs(rot) < 0.009) return finPt0(f, s, z, hgt);
+    const zc = (f.pts[0][0] + f.pts[f.pts.length - 1][0]) / 2, P0 = finPt0(f, s, zc, 0), P1 = finPt0(f, s, zc, 1), dx = P1[0] - P0[0], dy = P1[1] - P0[1], du = z - zc, sn = Math.sin(rot);
+    return [P0[0] - s * dy * du * sn + dx * hgt, P0[1] + s * dx * du * sn + dy * hgt, zc + du * Math.cos(rot)];
+  }
+  function finPt0(f, s, z, hgt) {
     const a = (f.ang || 0) * Math.PI / 180, t = f.side === 'back' ? Math.PI / 2 - a : f.side === 'belly' ? -Math.PI / 2 + a : a, cy = (B3.top(z) + B3.bot(z)) / 2, h = Math.max(1e-4, (B3.top(z) - B3.bot(z)) / 2), w = B3.w(s, z), ct = Math.cos(t), st = Math.sin(t);
     let nx = ct / w, ny = st / h; const nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;
     const tl = (f.tilt || 0) * Math.PI / 180, dx = nx * Math.cos(tl) - ny * Math.sin(tl), dy = nx * Math.sin(tl) + ny * Math.cos(tl);
     return [s * (w * ct + dx * hgt), cy + h * st + dy * hgt, z];
   }
-  const sideShown = f => f.mirror === false ? (f.flank || 1) : (lastMats && lastMats[0].cam < 0 ? -1 : 1);
+  const sideShown = f => single(f) ? 1 : f.mirror === false ? (f.flank || 1) : (lastMats && lastMats[0].cam < 0 ? -1 : 1);
   const fin3 = (f, p) => offFin(f) && B3 ? finPt(f, sideShown(f), p[0], Math.max(0, hgtOf(f, p))) : [0, p[1], p[0]];
   const dense = pts => { const out = []; for (let i = 0; i < pts.length - 1; i++) for (let k = 0; k < 4; k++) out.push([pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k / 4, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k / 4]); out.push(pts[pts.length - 1].slice()); return out; };
   // the pieces themselves: a fan of triangles from the middle of the fin's root to its outline, added to the body section under the root.
@@ -111,7 +121,7 @@
       const pol = ol.map((p, n) => [Math.atan2(Hs[n], p[0] - zc), Math.hypot(Hs[n], p[0] - zc)]), rmax = Math.max(1e-6, ...pol.map(q => q[1]));
       const uv = (ang, r) => { const al = clamp(1 - ang / Math.PI, 0, 1), d = clamp(r / rmax, 0, 1); return sw.vert ? [(sw.x0 + 0.5 + d * (sw.x1 - sw.x0)) / W, (sw.y0 + 0.5 + al * (sw.y1 - sw.y0)) / H] : [(sw.x0 + 0.5 + al * (sw.x1 - sw.x0)) / W, (sw.y0 + 0.5 + d * (sw.y1 - sw.y0)) / H]; };
       const S = built.slices[Math.min(built.slices.length - 1, cuts.filter(c => c < zc * k).length)], sc = v => [v[0] * k, v[1] * k, v[2] * k];
-      (f.mirror === false ? [f.flank || 1] : [1, -1]).forEach(s => {
+      (single(f) ? [1] : f.mirror === false ? [f.flank || 1] : [1, -1]).forEach(s => {
         const O = finPt(f, s, zc, -0.012), P = ol.map((p, n) => finPt(f, s, p[0], Hs[n]));
         for (let n = 0; n < ol.length - 1; n++) {
           const A = P[n], Bq = P[n + 1], e1 = [A[0] - O[0], A[1] - O[1], A[2] - O[2]], e2 = [Bq[0] - O[0], Bq[1] - O[1], Bq[2] - O[2]]; let nr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const nl = Math.hypot(nr[0], nr[1], nr[2]); if (nl < 1e-12) continue; nr = nr.map(v => v / nl);
@@ -142,7 +152,8 @@
       B3 = body3();
       const m = metres(); built = C.build(m.d); built.k = m.k; packFins(built); addSideFins(); dirtyShape = false; dirtySkin = true;
       if (!D.eyes) { const e = built.tables.eye; D.eyes = D.look.eyeSize > 0.05 ? [{ p: picToDes(e[0], e[1]), size: D.look.eyeSize, type: 'round', col: D.look.eye }] : []; eyeUI(); }
-      const t = built.tables; $('facts').textContent = 'About ' + D.lenCm.toFixed(1) + ' cm long. Back fin on ' + t.fin.slice(0, 6).filter(v => v < 50).length + ' of its 6 body sections, belly fin on ' + t.fin.slice(6).filter(v => v < 50).length + '. ' + built.slices.reduce((s, x) => s + x.T.length, 0) + ' triangles.';
+      const t = built.tables; $('facts').textContent = 'About ' + D.lenCm.toFixed(1) + ' cm long. Back fin on ' + t.fin.slice(0, 6).filter(v => v < 50).length + ' of its 6 body sections, belly fin on ' + t.fin.slice(6).filter(v => v < 50).length + '. ' + built.slices.reduce((s, x) => s + x.T.length, 0) + ' triangles.' + (packMiss ? ' ' + packMiss + ' fin(s) found no room in the picture and are not shown.' : '');
+      if (packMiss !== missTold) { missTold = packMiss; if (packMiss) say(packMiss + ' fin(s) found no room in the fish\'s picture and are not shown. Press More room on the Shape tab.', true); }
       return true;
     } catch (e) { say('This shape cannot be built (' + e.message + '). Press Undo.', true); return false; }
   }
@@ -458,15 +469,18 @@
   // where the pointer is on a fin's own plane: z along the body, and (a fin off the centre line) how far out of the skin, or (a centre fin) the height
   function finRay(f, x, y) {
     const r = rayAt(x, y), ln = Math.hypot(r.d[0], r.d[1], r.d[2]);
-    if (!offFin(f)) { if (Math.abs(r.d[0]) / ln < 1e-6) return null; const t = -r.o[0] / r.d[0]; return { z: r.o[2] + t * r.d[2], y: r.o[1] + t * r.d[1], ok: Math.abs(r.d[0]) / ln >= 0.12 }; }
-    const a = f.pts[0], b = f.pts[f.pts.length - 1], zc = (a[0] + b[0]) / 2, s = sideShown(f), P0 = finPt(f, s, zc, 0), P1 = finPt(f, s, zc, 1), v = [P1[0] - P0[0], P1[1] - P0[1]], den = -r.d[0] * v[1] + r.d[1] * v[0]; if (Math.abs(den) / ln < 0.1) return { ok: false };
-    const t = (-(P0[0] - r.o[0]) * v[1] + (P0[1] - r.o[1]) * v[0]) / den, q = [r.o[0] + t * r.d[0], r.o[1] + t * r.d[1], r.o[2] + t * r.d[2]]; return { z: q[2], hgt: (q[0] - P0[0]) * v[0] + (q[1] - P0[1]) * v[1], ok: true };
+    if (!offFin(f)) { if (Math.abs(r.d[0]) / ln < 1e-6) return null; const t = -r.o[0] / r.d[0]; return { z: r.o[2] + t * r.d[2], wz: r.o[2] + t * r.d[2], y: r.o[1] + t * r.d[1], ok: Math.abs(r.d[0]) / ln >= 0.12 }; }
+    // the fin's own plane: through its root's middle, spanned by "straight out of the skin" (v) and "along its root" (u, turned by f.rot)
+    const a = f.pts[0], b = f.pts[f.pts.length - 1], zc = (a[0] + b[0]) / 2, s = sideShown(f), P0 = finPt(f, s, zc, 0), P1 = finPt(f, s, zc, 1), v = [P1[0] - P0[0], P1[1] - P0[1], 0], rot = (f.rot || 0) * Math.PI / 180;
+    const u = [-s * v[1] * Math.sin(rot), s * v[0] * Math.sin(rot), Math.cos(rot)], nr = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], den = r.d[0] * nr[0] + r.d[1] * nr[1] + r.d[2] * nr[2]; if (Math.abs(den) / ln < 0.1) return { ok: false };
+    const t = ((P0[0] - r.o[0]) * nr[0] + (P0[1] - r.o[1]) * nr[1] + (P0[2] - r.o[2]) * nr[2]) / den, w = [r.o[0] + t * r.d[0] - P0[0], r.o[1] + t * r.d[1] - P0[1], r.o[2] + t * r.d[2] - P0[2]];
+    return { z: zc + w[0] * u[0] + w[1] * u[1] + w[2] * u[2], hgt: w[0] * v[0] + w[1] * v[1], wz: r.o[2] + t * r.d[2], ok: true };
   }
   // sliding a fin: it follows the pointer along the body's edge; pulled across the body it goes over to the other edge
   function slideFin(x, y) {
     if (offFin(d3.slide.f)) {      // a fin off the centre line slides along the body and keeps its place around it (that is the "Around the body" slider)
       const f = d3.slide.f, q = finRay(f, x, y); if (!q || !q.ok) { say('Turn the view to face this fin more squarely to slide it.'); return; }
-      const a = f.pts[0], b = f.pts[f.pts.length - 1], lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]), dz = clamp(q.z - d3.slide.z0, Math.min(0, B3.z0 + 0.004 - lo), Math.max(0, B3.z1 - 0.004 - hi)), Hs = f.pts.map(p => hgtOf(f, p));
+      const a = f.pts[0], b = f.pts[f.pts.length - 1], lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]), dz = clamp(q.wz - d3.slide.z0, Math.min(0, B3.z0 + 0.004 - lo), Math.max(0, B3.z1 - 0.004 - hi)), Hs = f.pts.map(p => hgtOf(f, p));
       f.pts.forEach((p, n) => { p[0] += dz; p[1] = fromHgt(f, p[0], Hs[n]); }); d3.slide.z0 += dz; dirtyShape = true; return;
     }
     const r = rayAt(x, y), ln = Math.hypot(r.d[0], r.d[1], r.d[2]); if (Math.abs(r.d[0]) / ln < 0.12) { say('Turn the view to look more from the side to slide a fin.'); return; }
@@ -487,7 +501,7 @@
         if (tab === 'paint') { strokeStart(); d3.st = {}; if (paint3(x, y)) return; d3.st = null; undos.pop(); }
         else {
           const h = near3(x, y); if (h) { if (h.kind === 'eye') { selEye = h.i; eyeUI(); } remember(false); d3.drag = { h, y0: pos3(h)[1] }; return; }
-          if (tab === 'fins' && MV && MV.inv) { const o = ownAt(skinAt(x, y)); if (o >= 2 && o - 2 < D.fins.length) { selFin = o - 2; finButtons(); const q = finRay(D.fins[selFin], x, y); if (q && q.z !== undefined) { remember(false); d3.slide = { f: D.fins[selFin], z0: q.z }; return; } } }
+          if (tab === 'fins' && MV && MV.inv) { const o = ownAt(skinAt(x, y)); if (o >= 2 && o - 2 < D.fins.length) { selFin = o - 2; finButtons(); const q = finRay(D.fins[selFin], x, y); if (q && q.wz !== undefined) { remember(false); d3.slide = { f: D.fins[selFin], z0: q.wz }; return; } } }
         }
       }
       d3.orbit = true; hud.style.cursor = 'grabbing';
@@ -578,13 +592,29 @@
   }
   function pickBrush() { if (mode === 'erase') { $('picker').hidden = true; return; } const m = mode; pickOpen('pickhome-paint', { name: m === 'glow' ? 'Glow brush colour' : 'Brush colour', get: () => brushCol[m], set: v => { brushCol[m] = v; } }); }
 
+  // ROOM (v0.9). The drawing frame is as large as the fish's picture and cannot grow - but the fish inside it can be drawn smaller, which
+  // leaves room for long trailing fins and for the patches of many fins. Everything shrinks together about the nose (shape, eyes,
+  // paint, cuts, the fins' own paint); the fish's size in the game is still "Length in game". The price: fewer dots for the fish itself.
+  function scaleDesign(fac) {
+    const az = -0.47, all = D.body.top.concat(D.body.bot), bz = D.body.top.map(p => p[0]), len = (Math.max(...bz) - Math.min(...bz)) * fac;
+    D.fins.forEach(f => { if (f.side !== 'side') f.pts.forEach(p => all.push(p)); }); if (D.tail) D.tail.pts.forEach(p => all.push(p));
+    if (fac < 1 && len < 0.2) { say('The drawing is as small as it can usefully get.', true); return; }
+    if (fac > 1 && all.some(p => az + (p[0] - az) * fac > 0.49 || Math.abs(p[1] * fac) > YH * 0.96)) { say('There is no room to draw it larger: something would leave the frame.', true); return; }
+    remember(true); const S = p => { p[0] = az + (p[0] - az) * fac; p[1] *= fac; };
+    D.body.top.forEach(S); D.body.bot.forEach(S); D.body.width.forEach(S); if (D.body.widthL) D.body.widthL.forEach(S); D.fins.forEach(f => f.pts.forEach(S)); if (D.tail) D.tail.pts.forEach(S); (D.eyes || []).forEach(e => S(e.p));
+    const from = new Int32Array(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const d = picToDes(x + 0.5, y + 0.5), q = toPic([az + (d[0] - az) / fac, d[1] / fac]), ox = Math.floor(q[0]), oy = Math.floor(q[1]); from[y * W + x] = ox < 0 || oy < 0 || ox >= W || oy >= H ? -1 : oy * W + ox; }
+    const move4 = arr => { const old = arr.slice(); arr.fill(0); for (let i = 0; i < W * H; i++) { const o = from[i]; if (o >= 0) for (let c = 0; c < 4; c++) arr[i * 4 + c] = old[o * 4 + c]; } };
+    [L.A.paint, L.A.glow, L.B.paint, L.B.glow].forEach(move4); const oldCut = cut.slice(); cut.fill(0); for (let i = 0; i < W * H; i++) if (from[i] >= 0) cut[i] = oldCut[from[i]];
+    for (const id in finPaint) [finPaint[id].paint, finPaint[id].glow].forEach(arr => { const old = arr.slice(); arr.fill(0); for (let ly = 0; ly < FL.H; ly++) for (let lx = 0; lx < FL.W; lx++) { const q = flIndex((((lx + 0.5) / FL.W - 0.5) * FL.X) / fac, ((1 - (ly + 0.5) / FL.H) * FL.Y) / fac); if (q >= 0) for (let c = 0; c < 4; c++) arr[(ly * FL.W + lx) * 4 + c] = old[q + c]; } });
+    dirtyShape = true; say(fac < 1 ? 'The fish is drawn smaller: more room around it (its size in the game has not changed).' : 'The fish is drawn larger again.');
+  }
   // ---- controls ----
   function finButtons() {
     const box = $('finlist'); box.textContent = '';
     const add = (label, idx) => { const b = document.createElement('button'); b.textContent = label; b.setAttribute('aria-pressed', selFin === idx ? 'true' : 'false'); b.addEventListener('click', () => { selFin = idx; finButtons(); }); box.appendChild(b); };
     D.fins.forEach((f, i) => add((f.side === 'back' ? 'Back fin ' : f.side === 'belly' ? 'Belly fin ' : 'Side fin ') + (i + 1), i)); if (D.tail) add('Tail', D.fins.length);
     const f = curFin(), fin = f && f !== D.tail, off = offFin(f); press('f-curve', !!(f && f.curve)); ['f-curve', 'f-clear', 'f-rays', 'f-rayn', 'f-mend'].forEach(id => { $(id).disabled = !f; });
-    const zn = ZONE[fin ? f.side : 'back']; $('f-ang').min = zn[0]; $('f-ang').max = zn[1]; $('f-ang').disabled = !fin; $('f-tilt').disabled = !off; $('f-mirror').disabled = !off; press('f-mirror', off && f.mirror !== false); $('f-flip').disabled = !(off && f.mirror === false); $('f-mend').disabled = !f || off; $('f-cut').disabled = false;
+    const zn = ZONE[fin ? f.side : 'back']; $('f-ang').min = zn[0]; $('f-ang').max = zn[1]; $('f-ang').disabled = !fin; $('f-rot').disabled = !fin; $('f-tilt').disabled = !off; $('f-mirror').disabled = !off || single(f); press('f-mirror', off && f.mirror !== false); $('f-flip').disabled = !(off && f.mirror === false); $('f-mend').disabled = !f || off; $('f-cut').disabled = false;
     syncs.forEach(fn => fn());
   }
   function setTab(t) {
@@ -607,14 +637,14 @@
     bind('cutsize', () => $('cutsize').value, () => { }, v => v + ' dots');
     const finShape = fn => v => { const f = curFin(); if (f && f !== D.tail) { fn(f, v); dirtyShape = true; } };
     bind('f-ang', () => { const f = curFin(); return f && f !== D.tail ? f.ang || 0 : 0; }, finShape((f, v) => {
-      if (!offFin(f) && Math.abs(v) > 0.5 && D.fins.filter(offFin).length >= SLOTS.length) { say('A fish can carry four fins off the centre line (a mirrored pair counts as one). Remove one first.', true); $('f-ang').value = 0; return; }
       const was = offFin(f); f.ang = v; if (f.mirror === undefined) f.mirror = true; if (was !== offFin(f)) { finButtons(); say(offFin(f) ? 'This fin now stands off the centre line: it has a twin on the other side, and you can paint on it like the rest (cuts not yet).' : 'Back on the centre line.'); }
     }), v => { const f = curFin(); return !f || f === D.tail ? '-' : f.side === 'side' ? (v > 0 ? 'up ' : v < 0 ? 'down ' : 'middle ') + Math.abs(v) + '°' : v < 0.5 ? 'centre line' : v + '° off centre'; }, true);
     bind('f-tilt', () => (curFin() || {}).tilt || 0, finShape((f, v) => { f.tilt = v; }), v => (v > 0 ? 'up ' : v < 0 ? 'down ' : '') + Math.abs(v) + '°', true);
+    bind('f-rot', () => { const f = curFin(); return f && f !== D.tail ? f.rot || 0 : 0; }, finShape((f, v) => { const was = offFin(f); f.rot = v; if (f.mirror === undefined) f.mirror = true; if (was !== offFin(f)) { finButtons(); if (offFin(f)) say('Turned: this fin is now a piece of its own, and you can paint on it like the rest (cuts not yet).'); } }), v => v === 0 ? 'along the body' : Math.abs(v) === 90 ? 'across the body' : v + '\u00b0', true);
     $('f-mirror').addEventListener('click', () => { const f = curFin(); if (!offFin(f)) return; remember(false); f.mirror = f.mirror === false; if (!f.flank) f.flank = 1; finButtons(); dirtyShape = true; say(f.mirror ? 'This fin has a twin on the other side.' : 'This fin is on one side only. "Other side" moves it across.'); });
     $('f-flip').addEventListener('click', () => { const f = curFin(); if (!offFin(f) || f.mirror !== false) return; remember(false); f.flank = -(f.flank || 1); dirtyShape = true; });
     $('addside').addEventListener('click', () => {
-      if (D.fins.filter(offFin).length >= SLOTS.length) { say('A fish can carry four fins off the centre line (a mirrored pair counts as one). Remove one first.', true); return; }
+      if (D.fins.length >= MAXFINS) { say('A fish can carry ' + MAXFINS + ' fins (the tail not counted). Remove one first.', true); return; }
       remember(false); const z0 = Math.min(...D.body.top.map(p => p[0])), L = Math.max(...D.body.top.map(p => p[0])) - z0, at = z0 + 0.3 * L;
       D.fins.push({ side: 'side', ang: -6, tilt: -10, mirror: true, flank: 1, curve: true, pts: [[at - 0.03, 0], [at + 0.01, 0.06], [at + 0.1, 0.1], [at + 0.07, 0.04], [at + 0.03, 0]] }); selFin = D.fins.length - 1; finButtons(); dirtyShape = true; say('A pair of side fins. Drag one to slide it along the body; the sliders set its place around the body and its tilt.');
     });
@@ -632,9 +662,10 @@
     $('bmirror').addEventListener('click', () => { remember(false); D.body.widthL = D.body.widthL ? null : D.body.width.map(p => [p[0], p[1]]); press('bmirror', !D.body.widthL); dirtyShape = true; say(D.body.widthL ? 'The two flanks can now differ: drag the teal handles on either side.' : 'Both flanks are the same again.'); });
     $('smirror').addEventListener('click', () => { remember(true); D.skinMirror = !D.skinMirror; if (!D.skinMirror) { L.B.paint.set(L.A.paint); L.B.glow.set(L.A.glow); } press('smirror', D.skinMirror); dirtySkin = true; say(D.skinMirror ? 'One skin for both sides (the left side\'s).' : 'The two sides are now painted separately. "Flat: left and right" shows both. In the game both sides still show the left side until an ARCA update.'); });
     $('glowlit').addEventListener('click', () => { remember(false); D.look.glowLit = !D.look.glowLit; press('glowlit', D.look.glowLit); say(D.look.glowLit ? 'Always glow: the glow marks always show.' : 'The glow marks are now hidden in the light. You see them while painting with the Glow brush, and on the Motion tab with Lights off.'); });
+    $('room-more').addEventListener('click', () => scaleDesign(0.8)); $('room-less').addEventListener('click', () => scaleDesign(1.25));
     $('mirror').addEventListener('click', () => { remember(false); D.body.bot = D.body.top.map(p => [p[0], -p[1]]); dirtyShape = true; });
-    $('addback').addEventListener('click', () => { remember(false); D.fins.push({ side: 'back', pts: [[-0.05, 0.1], [0.0, 0.18], [0.06, 0.1]] }); selFin = D.fins.length - 1; finButtons(); dirtyShape = true; });
-    $('addbelly').addEventListener('click', () => { remember(false); D.fins.push({ side: 'belly', pts: [[-0.05, -0.09], [0.0, -0.17], [0.06, -0.09]] }); selFin = D.fins.length - 1; finButtons(); dirtyShape = true; });
+    $('addback').addEventListener('click', () => { if (D.fins.length >= MAXFINS) { say('A fish can carry ' + MAXFINS + ' fins (the tail not counted). Remove one first.', true); return; } remember(false); D.fins.push({ side: 'back', pts: [[-0.05, 0.1], [0.0, 0.18], [0.06, 0.1]] }); selFin = D.fins.length - 1; finButtons(); dirtyShape = true; });
+    $('addbelly').addEventListener('click', () => { if (D.fins.length >= MAXFINS) { say('A fish can carry ' + MAXFINS + ' fins (the tail not counted). Remove one first.', true); return; } remember(false); D.fins.push({ side: 'belly', pts: [[-0.05, -0.09], [0.0, -0.17], [0.06, -0.09]] }); selFin = D.fins.length - 1; finButtons(); dirtyShape = true; });
     $('addtail').addEventListener('click', () => { if (D.tail) { say('This fish already has a tail. Tap it to reshape it.'); return; } remember(false); const z = Math.max(...D.body.top.map(p => p[0])); D.tail = { pts: [[z - 0.02, 0.02], [z + 0.12, 0.14], [z + 0.08, 0], [z + 0.12, -0.14], [z - 0.02, -0.02]] }; selFin = D.fins.length; finButtons(); dirtyShape = true; });
     $('delfin').addEventListener('click', () => { if (!selPart()) return; remember(false); if (selFin < D.fins.length) D.fins.splice(selFin, 1); else D.tail = null; selFin = 0; finButtons(); dirtyShape = true; });
     confirmBtn('clearpaint', 'Tap again to clear', () => { remember(true); L.A.paint.fill(0); L.B.paint.fill(0); dirtySkin = true; say('Paint cleared. Undo brings it back.'); });
