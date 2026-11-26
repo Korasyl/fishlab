@@ -1,4 +1,4 @@
-// ARCA FISH LAB v0.7 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.8 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
@@ -40,6 +40,38 @@
   // settings, kept in a strip in the picture's unused margin (a "swatch"); up to four of them (a mirrored pair counts once).
   const ZONE = { back: [0, 25], belly: [0, 25], side: [-18, 18] }, SLOTS = [{ x0: 1, y0: 16, x1: 12, y1: 239, vert: true }, { x0: 499, y0: 16, x1: 510, y1: 239, vert: true }, { x0: 16, y0: 1, x1: 495, y1: 7 }, { x0: 16, y0: 248, x1: 495, y1: 254 }];
   const offFin = f => !!f && f !== D.tail && (f.side === 'side' || Math.abs(f.ang || 0) > 0.5);
+  // (v0.8) PAINTING ON THESE FINS. Each fin off the centre line gets a patch of its own in the fish's picture: a free rectangle is
+  // looked for wherever the main drawing leaves room (packFins), as large as fits (full sharpness down to about a fifth). The fin lies
+  // flat in its patch (along the body = across, out of the skin = up). What is painted on it is kept with the fin, in a small sheet of
+  // its own measured from the middle of its root (finPaint, FL) - so the paint stays put when the fin slides or the patch moves.
+  // A fin that finds no room falls back to a strip in the margin (swMap) and cannot be painted.
+  const FL = { W: 128, H: 96, X: 0.4, Y: 0.3 }, finPaint = {}; let packs = {};
+  const finLay = f => { if (!f.id) f.id = Math.random().toString(36).slice(2, 9); return finPaint[f.id] || (finPaint[f.id] = { paint: new Uint8ClampedArray(FL.W * FL.H * 4), glow: new Uint8ClampedArray(FL.W * FL.H * 4) }); };
+  const flIndex = (dz, hg) => { const lx = Math.floor((dz / FL.X + 0.5) * FL.W), ly = Math.floor((1 - hg / FL.Y) * FL.H); return lx < 0 || ly < 0 || lx >= FL.W || ly >= FL.H ? -1 : (ly * FL.W + lx) * 4; };
+  const packAt = (px, py) => { for (const k in packs) { const p = packs[k]; if (px >= p.x0 && px < p.x0 + p.w && py >= p.y0 && py < p.y0 + p.h) return [p, +k]; } return null; };
+  // write the patches and strips into a built fish's map (class 254 = skin that is always there; own = the fin)
+  function stampPacks(b, occ) {
+    const put = (x, y, code) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const i = y * W + x; b.cls[i] = 254; b.own[i] = code; b.blob[i] = 254; if (occ) occ[i] = 1; };
+    for (const k in packs) { const p = packs[k]; for (let y = p.y0; y < p.y0 + p.h; y++) for (let x = p.x0; x < p.x0 + p.w; x++) { const lz = p.z0 + (x + 0.5 - p.x0 - 2) / p.den, hg = (p.y0 + p.h - 2 - (y + 0.5)) / p.den, e = 1.2 / p.den; if (C.insidePoly(p.poly, lz, hg) || C.insidePoly(p.poly, lz - e, hg) || C.insidePoly(p.poly, lz + e, hg) || C.insidePoly(p.poly, lz, hg - e) || C.insidePoly(p.poly, lz, hg + e)) put(x, y, +k); } }
+    for (const k in swMap) { const w = swMap[k]; for (let y = w.y0 - 1; y <= w.y1 + 1; y++) for (let x = w.x0 - 1; x <= w.x1 + 1; x++) put(x, y, +k); }
+  }
+  function packFins(b) {
+    packs = {}; swMap = {}; const DEN = 0.94 * W, occ = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) occ[i] = b.own[i] ? 1 : 0; let slot = 0;
+    D.fins.forEach((f, i) => {
+      if (!offFin(f) || f.pts.length < 3) return;
+      const ol = f.curve ? smooth(f.pts) : dense(f.pts), a = f.pts[0], e = f.pts[f.pts.length - 1], zc = (a[0] + e[0]) / 2, poly = ol.map(p => [p[0], Math.max(0, hgtOf(f, p))]);
+      const z0 = Math.min(...poly.map(p => p[0])), z1 = Math.max(...poly.map(p => p[0])), h1 = Math.max(0.01, ...poly.map(p => p[1])), rmax = Math.max(1e-6, ...poly.map(p => Math.hypot(p[0] - zc, p[1])));
+      const I = new Int32Array((W + 1) * (H + 1)); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) I[(y + 1) * (W + 1) + x + 1] = occ[y * W + x] + I[y * (W + 1) + x + 1] + I[(y + 1) * (W + 1) + x] - I[y * (W + 1) + x];
+      const sum = (x, y, w, h) => I[(y + h) * (W + 1) + x + w] - I[y * (W + 1) + x + w] - I[(y + h) * (W + 1) + x] + I[y * (W + 1) + x]; let pk = null;
+      for (const sc of [1, 0.8, 0.65, 0.5, 0.4, 0.3, 0.22]) {
+        const den = DEN * sc, w = Math.ceil((z1 - z0) * den) + 4, h = Math.ceil(h1 * den) + 4; if (w > W - 6 || h > H - 6) continue;
+        for (let y = 5; y + h < H - 5 && !pk; y += 3) for (let x = 5; x + w < W - 5; x += 3) if (sum(x - 4, y - 4, w + 8, h + 8) === 0) { pk = { x0: x, y0: y, w, h, den, sc, z0, zc, rmax, poly }; break; }
+        if (pk) break;
+      }
+      if (pk) { packs[2 + i] = pk; const only = packs, one = {}; one[2 + i] = pk; packs = one; const keepSw = swMap; swMap = {}; stampPacks(b, occ); packs = only; swMap = keepSw; }
+      else if (slot < SLOTS.length) { const one = {}; one[2 + i] = SLOTS[slot++]; const keepP = packs, keepSw = swMap; packs = {}; swMap = one; stampPacks(b, occ); packs = keepP; swMap = keepSw; swMap[2 + i] = one[2 + i]; }
+    });
+  }
   let B3 = null, swMap = {};      // B3: the body's curves (made at every rebuild); swMap: fin's owner code -> its swatch strip
   function body3() { const top = C.curve(D.body.top), bot = C.curve(D.body.bot), wr = C.curve(D.body.width), wl = C.curve(D.body.widthL || D.body.width), zs = D.body.top.map(p => p[0]), z0 = Math.min(...zs), z1 = Math.max(...zs), cz = z => clamp(z, z0, z1); return { z0, z1, top: z => top(cz(z)), bot: z => bot(cz(z)), w: (s, z) => Math.max(1e-4, (s > 0 ? wr : wl)(cz(z)) * D.body.wide) }; }
   // how far a fin's point stands out of the skin, and back again (a back fin's points are kept as heights in the side picture, a side fin's as "how far out")
@@ -57,10 +89,24 @@
   const dense = pts => { const out = []; for (let i = 0; i < pts.length - 1; i++) for (let k = 0; k < 4; k++) out.push([pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k / 4, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k / 4]); out.push(pts[pts.length - 1].slice()); return out; };
   // the pieces themselves: a fan of triangles from the middle of the fin's root to its outline, added to the body section under the root.
   // In the picture a fin is unrolled like a fan: along the strip = round the fan (so the rays run root to rim), across it = root to tip.
+  // The flat fin sheet in the middle plane shows whatever the picture holds - so it would show a fin's PATCH too, as a ghost fin
+  // hanging in the water. So the sheet is cut away over every patch: its triangles there are split small (three times, to about
+  // three dots) and the bits that touch a patch are dropped.
+  function trimSheet() {
+    const rects = Object.values(packs).map(p => [p.x0 - 1, p.y0 - 1, p.x0 + p.w + 1, p.y0 + p.h + 1]); if (!rects.length) return;
+    const hits = us => { const x0 = Math.min(us[0][0], us[1][0], us[2][0]) * W, x1 = Math.max(us[0][0], us[1][0], us[2][0]) * W, y0 = Math.min(us[0][1], us[1][1], us[2][1]) * H, y1 = Math.max(us[0][1], us[1][1], us[2][1]) * H; return rects.some(r => x1 > r[0] && x0 < r[2] && y1 > r[1] && y0 < r[3]); };
+    built.slices.forEach(S => {
+      const keep = [], mid = (a, b) => ({ p: [(a.p[0] + b.p[0]) / 2, (a.p[1] + b.p[1]) / 2, (a.p[2] + b.p[2]) / 2], n: a.n, u: [(a.u[0] + b.u[0]) / 2, (a.u[1] + b.u[1]) / 2] });
+      const rec = (a, b, c, lvl) => { if (!hits([a.u, b.u, c.u])) { const i0 = S.P.length; [a, b, c].forEach(v => { S.P.push(v.p); S.N.push(v.n); S.UV.push(v.u); }); keep.push([i0, i0 + 1, i0 + 2]); return; } if (!lvl) return; const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a); rec(a, ab, ca, lvl - 1); rec(ab, b, bc, lvl - 1); rec(ca, bc, c, lvl - 1); rec(ab, bc, ca, lvl - 1); };
+      S.T.forEach(t => { const flat = t.every(i => Math.abs(S.P[i][0]) < 1e-9), tri = t.map(i => ({ p: S.P[i], n: S.N[i], u: S.UV[i] })); if (!flat || !hits(tri.map(v => v.u))) { keep.push(t); return; } rec(tri[0], tri[1], tri[2], 3); });
+      S.T = keep;
+    });
+  }
   function addSideFins() {
-    const k = built.k, cuts = built.tables.cut;
+    const k = built.k, cuts = built.tables.cut; trimSheet();
     D.fins.forEach((f, i) => {
-      const sw = swMap[2 + i]; if (!sw || f.pts.length < 3) return;
+      const sw = swMap[2 + i], pk = packs[2 + i]; if ((!sw && !pk) || f.pts.length < 3) return;
+      const uvp = (z, hg) => [(pk.x0 + 2 + (z - pk.z0) * pk.den) / W, (pk.y0 + pk.h - 2 - hg * pk.den) / H];
       const ol = f.curve ? smooth(f.pts) : dense(f.pts), a = f.pts[0], b = f.pts[f.pts.length - 1], zc = (a[0] + b[0]) / 2, Hs = ol.map(p => Math.max(0, hgtOf(f, p)));
       const pol = ol.map((p, n) => [Math.atan2(Hs[n], p[0] - zc), Math.hypot(Hs[n], p[0] - zc)]), rmax = Math.max(1e-6, ...pol.map(q => q[1]));
       const uv = (ang, r) => { const al = clamp(1 - ang / Math.PI, 0, 1), d = clamp(r / rmax, 0, 1); return sw.vert ? [(sw.x0 + 0.5 + d * (sw.x1 - sw.x0)) / W, (sw.y0 + 0.5 + al * (sw.y1 - sw.y0)) / H] : [(sw.x0 + 0.5 + al * (sw.x1 - sw.x0)) / W, (sw.y0 + 0.5 + d * (sw.y1 - sw.y0)) / H]; };
@@ -69,7 +115,7 @@
         const O = finPt(f, s, zc, -0.012), P = ol.map((p, n) => finPt(f, s, p[0], Hs[n]));
         for (let n = 0; n < ol.length - 1; n++) {
           const A = P[n], Bq = P[n + 1], e1 = [A[0] - O[0], A[1] - O[1], A[2] - O[2]], e2 = [Bq[0] - O[0], Bq[1] - O[1], Bq[2] - O[2]]; let nr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; const nl = Math.hypot(nr[0], nr[1], nr[2]); if (nl < 1e-12) continue; nr = nr.map(v => v / nl);
-          const uo = uv((pol[n][0] + pol[n + 1][0]) / 2, 0), ua = uv(pol[n][0], pol[n][1]), ub = uv(pol[n + 1][0], pol[n + 1][1]);
+          const uo = pk ? uvp(zc, 0) : uv((pol[n][0] + pol[n + 1][0]) / 2, 0), ua = pk ? uvp(ol[n][0], Hs[n]) : uv(pol[n][0], pol[n][1]), ub = pk ? uvp(ol[n + 1][0], Hs[n + 1]) : uv(pol[n + 1][0], pol[n + 1][1]);
           [[nr, [0, 1, 2]], [nr.map(v => -v), [0, 2, 1]]].forEach(([nn, order]) => { const i0 = S.P.length; [[O, uo], [A, ua], [Bq, ub]].forEach(([q, u]) => { S.P.push(sc(q)); S.N.push(nn); S.UV.push(u); }); S.T.push(order.map(o => i0 + o)); });      // both faces: the game draws one face of a triangle only
         }
       });
@@ -87,14 +133,14 @@
     const wd = a => byZ(a).map(p => [p[0] * k, p[1] * k * D.body.wide]);
     // the core's +x is the fish's right flank: "width" is the right one, "widthL" the left
     return { k, d: { win: { Z0: WIN.Z0 * k, Z1: WIN.Z1 * k, Y0: WIN.Y0 * k, Y1: WIN.Y1 * k, ZS: WIN.ZS * k },
-      body: { z0: bz0 * k, z1: bz1 * k, width: wd(D.body.width), widthL: D.body.widthL ? wd(D.body.widthL) : null, top: S(top), bot: S(bot) }, cut, swatches: Object.keys(swMap).map(o => { const w = swMap[o]; return { x0: w.x0 - 1, y0: w.y0 - 1, x1: w.x1 + 1, y1: w.y1 + 1, own: +o }; }), fins: D.fins.map(f => ({ side: f.side, off: offFin(f), pts: S(f.curve ? smooth(f.pts) : f.pts) })), tail: D.tail ? { pts: S(D.tail.curve ? smooth(D.tail.pts) : D.tail.pts) } : null } };
+      body: { z0: bz0 * k, z1: bz1 * k, width: wd(D.body.width), widthL: D.body.widthL ? wd(D.body.widthL) : null, top: S(top), bot: S(bot) }, cut, swatches: [], fins: D.fins.map(f => ({ side: f.side, off: offFin(f), pts: S(f.curve ? smooth(f.pts) : f.pts) })), tail: D.tail ? { pts: S(D.tail.curve ? smooth(D.tail.pts) : D.tail.pts) } : null } };
   }
   function rebuild() {
     try {
       const top = C.curve(D.body.top), bot = C.curve(D.body.bot);
       D.fins.forEach(f => { const e = f.side === 'back' ? top : f.side === 'belly' ? bot : () => 0, a = f.pts[0], b = f.pts[f.pts.length - 1]; a[1] = e(a[0]); b[1] = e(b[0]); });
-      B3 = body3(); swMap = {}; let slot = 0; D.fins.forEach((f, i) => { if (offFin(f) && slot < SLOTS.length) swMap[2 + i] = SLOTS[slot++]; });
-      const m = metres(); built = C.build(m.d); built.k = m.k; addSideFins(); dirtyShape = false; dirtySkin = true;
+      B3 = body3();
+      const m = metres(); built = C.build(m.d); built.k = m.k; packFins(built); addSideFins(); dirtyShape = false; dirtySkin = true;
       if (!D.eyes) { const e = built.tables.eye; D.eyes = D.look.eyeSize > 0.05 ? [{ p: picToDes(e[0], e[1]), size: D.look.eyeSize, type: 'round', col: D.look.eye }] : []; eyeUI(); }
       const t = built.tables; $('facts').textContent = 'About ' + D.lenCm.toFixed(1) + ' cm long. Back fin on ' + t.fin.slice(0, 6).filter(v => v < 50).length + ' of its 6 body sections, belly fin on ' + t.fin.slice(6).filter(v => v < 50).length + '. ' + built.slices.reduce((s, x) => s + x.T.length, 0) + ' triangles.';
       return true;
@@ -123,9 +169,9 @@
     if (!built) return;
     const K = L[key], paint = K.paint, glow = K.glow, skin = K.skin, gimg = K.gimg, Lk = D.look, cb = hex(Lk.back), cf = hex(Lk.flank), cl = hex(Lk.belly), cn = hex(Lk.fin), ct = hex(Lk.tip), cls = built.cls, own = built.own, Dm = built.Dm, Rm = built.Rm, tr = built.topr, br = built.botr;
     const er0 = built.tables.eye[2], eyes = (D.eyes || []).map(e => { const q = toPic(e.p); return { x: q[0], y: q[1], r: Math.max(1.5, er0 * e.size), c: hex(e.col), rc: hex(e.ring || '#14181c'), pc: hex(e.pup || '#000000'), t: e.type }; });
-    const fcache = {}, fp = o => { const f = (o === 250 ? D.tail : D.fins[o - 2]) || {}; return { a: 255 * (1 - clamp(f.clear || 0, 0, 0.95)), rays: f.rays == null ? Lk.rays : f.rays, rn: f.rayN || 1 }; };
+    const fcache = {}, fp = o => { const f = (o === 250 ? D.tail : D.fins[o - 2]) || {}; return { a: 255 * (1 - clamp(f.clear || 0, 0, 0.95)), rays: f.rays == null ? Lk.rays : f.rays, rn: f.rayN || 1, id: f.id }; };
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = y * W + x, o = i * 4, c = cls[i]; let r = 0, g = 0, b = 0, a = 0, ar = 0, ag = 0, ab = 0, ks = 1, kr = 1, ksh = 1, ecol = null, ealpha = 0;
+      const i = y * W + x, o = i * 4, c = cls[i]; let r = 0, g = 0, b = 0, a = 0, ar = 0, ag = 0, ab = 0, ks = 1, kr = 1, ksh = 1, ecol = null, ealpha = 0, flay = null, fq = -1;
       if (c === 255) {
         const rel = clamp((y + 0.5 - tr[x]) / Math.max(1, br[x] - tr[x]), 0, 1), t1 = sm(rel, 0.12, 0.5), t2 = sm(rel, 0.58, 0.92);
         r = cb[0] + (cf[0] - cb[0]) * t1; g = cb[1] + (cf[1] - cb[1]) * t1; b = cb[2] + (cf[2] - cb[2]) * t1;
@@ -136,11 +182,14 @@
         const F = fcache[own[i]] || (fcache[own[i]] = fp(own[i])), d = Dm[i], t = sm(d, 0.45, 1.0); r = cn[0] + (ct[0] - cn[0]) * t; g = cn[1] + (ct[1] - cn[1]) * t; b = cn[2] + (ct[2] - cn[2]) * t;
         const p = Rm[i] * (c === 180 ? 26 : 60) * F.rn, f = p - Math.floor(p), ray = sm(1 - Math.abs(f - 0.5) / (0.16 + 0.1 * (1 - d)), 0, 1) * F.rays, k = 1 - 0.42 * ray; ar = r; ag = g; ab = b; kr = k; r *= k; g *= k; b *= k;
         a = F.a + (255 - F.a) * ray * 0.5;      // a see-through fin: the rays stay more solid than the skin between them
-      } else if (c === 254 && swMap[own[i]]) {
-        // a swatch: the look of a fin off the centre line. Along the strip = round the fan (the rays), across it = root to tip.
-        const w = swMap[own[i]], F = fcache[own[i]] || (fcache[own[i]] = fp(own[i])), d = clamp(w.vert ? (x - w.x0) / (w.x1 - w.x0) : (y - w.y0) / (w.y1 - w.y0), 0, 1), al = clamp(w.vert ? (y - w.y0) / (w.y1 - w.y0) : (x - w.x0) / (w.x1 - w.x0), 0, 1), t = sm(d, 0.45, 1.0);
-        r = cn[0] + (ct[0] - cn[0]) * t; g = cn[1] + (ct[1] - cn[1]) * t; b = cn[2] + (ct[2] - cn[2]) * t;
+      } else if (c === 254 && (packs[own[i]] || swMap[own[i]])) {
+        // a fin off the centre line. In its patch it lies flat; in a margin strip it is unrolled like a fan. Either way: d = root to tip, al = round the fan (the rays).
+        const pk = packs[own[i]], w = swMap[own[i]], F = fcache[own[i]] || (fcache[own[i]] = fp(own[i])); let d, al;
+        if (pk) { const lz = pk.z0 + (x + 0.5 - pk.x0 - 2) / pk.den, hg = Math.max(0, (pk.y0 + pk.h - 2 - (y + 0.5)) / pk.den); d = clamp(Math.hypot(lz - pk.zc, hg) / pk.rmax, 0, 1); al = clamp(1 - Math.atan2(hg, lz - pk.zc) / Math.PI, 0, 1); flay = finPaint[F.id] || null; fq = flay ? flIndex(lz - pk.zc, hg) : -1; }
+        else { d = clamp(w.vert ? (x - w.x0) / (w.x1 - w.x0) : (y - w.y0) / (w.y1 - w.y0), 0, 1); al = clamp(w.vert ? (y - w.y0) / (w.y1 - w.y0) : (x - w.x0) / (w.x1 - w.x0), 0, 1); }
+        const t = sm(d, 0.45, 1.0); r = cn[0] + (ct[0] - cn[0]) * t; g = cn[1] + (ct[1] - cn[1]) * t; b = cn[2] + (ct[2] - cn[2]) * t;
         const p = al * 14 * F.rn, f = p - Math.floor(p), ray = sm(1 - Math.abs(f - 0.5) / 0.22, 0, 1) * F.rays, k = 1 - 0.42 * ray; ar = r; ag = g; ab = b; kr = k; r *= k; g *= k; b *= k; a = F.a + (255 - F.a) * ray * 0.5;
+        if (flay && fq >= 0) { const pa = flay.paint[fq + 3] / 255; r += (flay.paint[fq] - r) * pa; g += (flay.paint[fq + 1] - g) * pa; b += (flay.paint[fq + 2] - b) * pa; }
       }
       if (a && c !== 254) { const pa = paint[o + 3] / 255; r += (paint[o] - r) * pa; g += (paint[o + 1] - g) * pa; b += (paint[o + 2] - b) * pa; }
       if (a && c === 255) for (let n = 0; n < eyes.length; n++) {
@@ -156,16 +205,18 @@
       }
       skin[o] = r; skin[o + 1] = g; skin[o + 2] = b; skin[o + 3] = a;
       gimg[o] = glow[o]; gimg[o + 1] = glow[o + 1]; gimg[o + 2] = glow[o + 2]; gimg[o + 3] = a && c !== 254 ? glow[o + 3] : 0;
+      if (a && flay && fq >= 0) { gimg[o] = flay.glow[fq]; gimg[o + 1] = flay.glow[fq + 1]; gimg[o + 2] = flay.glow[fq + 2]; gimg[o + 3] = flay.glow[fq + 3]; }
     }
   }
   function compositeAll() { composite('A'); if (!D.skinMirror) composite('B'); dirtySkin = false; texDirty = true; }
 
   // ---- undo: the design as it was before each change (and the paint layers before each stroke) ----
   const undos = [];
-  function remember(withPaint) { undos.push({ d: JSON.stringify(D), p: withPaint ? [L.A.paint.slice(), L.A.glow.slice(), L.B.paint.slice(), L.B.glow.slice(), cut.slice()] : null }); if (undos.length > 16) undos.shift(); }
+  function remember(withPaint) { undos.push({ d: JSON.stringify(D), p: withPaint ? [L.A.paint.slice(), L.A.glow.slice(), L.B.paint.slice(), L.B.glow.slice(), cut.slice()] : null, f: withPaint ? Object.keys(finPaint).map(id => [id, finPaint[id].paint.slice(), finPaint[id].glow.slice()]) : null }); if (undos.length > 16) undos.shift(); }
   function undo() {
     const u = undos.pop(); if (!u) { say('Nothing to undo.'); return; }
     D = JSON.parse(u.d); if (u.p) { L.A.paint.set(u.p[0]); L.A.glow.set(u.p[1]); L.B.paint.set(u.p[2]); L.B.glow.set(u.p[3]); cut.set(u.p[4]); }
+    if (u.f) { for (const id in finPaint) delete finPaint[id]; u.f.forEach(q => { finPaint[q[0]] = { paint: q[1], glow: q[2] }; }); }
     selFin = Math.min(selFin, D.fins.length); selEye = 0; syncAll(); dirtyShape = true; dirtySkin = true; say('Undone.');
   }
 
@@ -225,6 +276,17 @@
 
   // ---- painting: a soft round dab into one side's layer (both, when the skin is mirrored) ----
   function dab(key, px, py) {
+    const hit = tab === 'paint' ? packAt(px, py) : null;
+    if (hit) {      // on a fin's patch: the dab goes into that fin's own sheet
+      const pk = hit[0], fin = D.fins[hit[1] - 2]; if (!fin) return; const lay = finLay(fin), cx = ((pk.z0 + (px - pk.x0 - 2) / pk.den - pk.zc) / FL.X + 0.5) * FL.W, cy = (1 - ((pk.y0 + pk.h - 2 - py) / pk.den) / FL.Y) * FL.H;
+      const R = Math.max(1, +$('bsize').value / pk.den * FL.W / FL.X), str = +$('bstr').value, bc = hex(brushCol[mode] || '#ffffff');
+      for (let yy = Math.max(0, Math.floor(cy - R)); yy <= Math.min(FL.H - 1, Math.ceil(cy + R)); yy++) for (let xx = Math.max(0, Math.floor(cx - R)); xx <= Math.min(FL.W - 1, Math.ceil(cx + R)); xx++) {
+        const d = Math.hypot(xx + 0.5 - cx, yy + 0.5 - cy) / R; if (d > 1) continue; const k = str * (1 - sm(d, 0.5, 1.0)) * 0.5, o = (yy * FL.W + xx) * 4;
+        if (mode === 'erase') { lay.paint[o + 3] = lay.paint[o + 3] * (1 - k); lay.glow[o + 3] = lay.glow[o + 3] * (1 - k); continue; }
+        const T = mode === 'glow' ? lay.glow : lay.paint, a0 = T[o + 3] / 255, a1 = a0 + (1 - a0) * k; for (let c = 0; c < 3; c++) T[o + c] = (T[o + c] * a0 * (1 - k) + bc[c] * k) / Math.max(1e-6, a0 * (1 - k) + k); T[o + 3] = a1 * 255;
+      }
+      dirtySkin = true; return;
+    }
     const m = tab === 'fins' ? 'cut' : mode, K = lay(key), R = m === 'cut' ? +$('cutsize').value : +$('bsize').value, str = +$('bstr').value, bc = hex(brushCol[m] || '#ffffff');
     for (let yy = Math.max(0, Math.floor(py - R)); yy <= Math.min(H - 1, Math.ceil(py + R)); yy++) for (let xx = Math.max(0, Math.floor(px - R)); xx <= Math.min(W - 1, Math.ceil(px + R)); xx++) {
       const d = Math.hypot(xx + 0.5 - px, yy + 0.5 - py) / R; if (d > 1) continue; const i = yy * W + xx; if (!built || !built.cls[i] || built.cls[i] === 254) continue;
@@ -546,7 +608,7 @@
     const finShape = fn => v => { const f = curFin(); if (f && f !== D.tail) { fn(f, v); dirtyShape = true; } };
     bind('f-ang', () => { const f = curFin(); return f && f !== D.tail ? f.ang || 0 : 0; }, finShape((f, v) => {
       if (!offFin(f) && Math.abs(v) > 0.5 && D.fins.filter(offFin).length >= SLOTS.length) { say('A fish can carry four fins off the centre line (a mirrored pair counts as one). Remove one first.', true); $('f-ang').value = 0; return; }
-      const was = offFin(f); f.ang = v; if (f.mirror === undefined) f.mirror = true; if (was !== offFin(f)) { finButtons(); say(offFin(f) ? 'This fin now stands off the centre line: it has a twin on the other side, and its look comes from the sliders here (no brush paint or cuts on it yet).' : 'Back on the centre line.'); }
+      const was = offFin(f); f.ang = v; if (f.mirror === undefined) f.mirror = true; if (was !== offFin(f)) { finButtons(); say(offFin(f) ? 'This fin now stands off the centre line: it has a twin on the other side, and you can paint on it like the rest (cuts not yet).' : 'Back on the centre line.'); }
     }), v => { const f = curFin(); return !f || f === D.tail ? '-' : f.side === 'side' ? (v > 0 ? 'up ' : v < 0 ? 'down ' : 'middle ') + Math.abs(v) + '°' : v < 0.5 ? 'centre line' : v + '° off centre'; }, true);
     bind('f-tilt', () => (curFin() || {}).tilt || 0, finShape((f, v) => { f.tilt = v; }), v => (v > 0 ? 'up ' : v < 0 ? 'down ' : '') + Math.abs(v) + '°', true);
     $('f-mirror').addEventListener('click', () => { const f = curFin(); if (!offFin(f)) return; remember(false); f.mirror = f.mirror === false; if (!f.flank) f.flank = 1; finButtons(); dirtyShape = true; say(f.mirror ? 'This fin has a twin on the other side.' : 'This fin is on one side only. "Other side" moves it across.'); });
@@ -577,7 +639,7 @@
     $('delfin').addEventListener('click', () => { if (!selPart()) return; remember(false); if (selFin < D.fins.length) D.fins.splice(selFin, 1); else D.tail = null; selFin = 0; finButtons(); dirtyShape = true; });
     confirmBtn('clearpaint', 'Tap again to clear', () => { remember(true); L.A.paint.fill(0); L.B.paint.fill(0); dirtySkin = true; say('Paint cleared. Undo brings it back.'); });
     confirmBtn('clearglow', 'Tap again to clear', () => { remember(true); L.A.glow.fill(0); L.B.glow.fill(0); dirtySkin = true; say('Glow cleared. Undo brings it back.'); });
-    confirmBtn('newfish', 'Tap again to start over', () => { remember(true); const pal = D.palette; D = fresh(); D.palette = pal; L.A.paint.fill(0); L.A.glow.fill(0); L.B.paint.fill(0); L.B.glow.fill(0); cut.fill(0); selFin = 0; selEye = 0; syncAll(); dirtyShape = true; say('A new fish. Undo brings the old one back.'); });
+    confirmBtn('newfish', 'Tap again to start over', () => { remember(true); const pal = D.palette; D = fresh(); D.palette = pal; L.A.paint.fill(0); L.A.glow.fill(0); L.B.paint.fill(0); L.B.glow.fill(0); cut.fill(0); for (const id in finPaint) delete finPaint[id]; selFin = 0; selEye = 0; syncAll(); dirtyShape = true; say('A new fish. Undo brings the old one back.'); });
     $('undo').addEventListener('click', undo); addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !(e.target && e.target.type === 'text')) { e.preventDefault(); undo(); } });
     const lookFrom = (y, p) => () => { yaw = y; pitch = p; panX = panY = 0; };
     $('v-front').addEventListener('click', lookFrom(Math.PI / 2, 0)); $('v-right').addEventListener('click', lookFrom(-Math.PI / 2, 0)); $('v-top').addEventListener('click', lookFrom(Math.PI / 2, 1.5)); $('v-34').addEventListener('click', lookFrom(-0.9, 0.22));
@@ -653,7 +715,7 @@
     put('name', D.name.replace(/[=\r\n|]/g, ' ').trim() || 'Unnamed'); put('len', (D.lenCm / 100).toFixed(4)); put('pace', D.pace.toFixed(2)); put('wag', D.wag.toFixed(2)); put('glowhue', '0.500'); put('glows', a.any || (b && b.any) ? 1 : 0); put('glowlit', D.look.glowLit ? 1 : 0); put('twoside', b ? 1 : 0);
     put('asp', t.asp); put('eye', t.eye.join(',')); put('span', t.span.join(',')); put('head', t.head); put('cut', t.cut.join(',')); put('fin', t.fin.join(',')); put('brow', t.brow.join(','));
     // the map goes out with the fins WHOLE: in the game the cuts are a feature of their own (the layer lx), which a fish may lack
-    const mw = metres(); mw.d.cut = null; const whole = C.build(mw.d); whole.k = built.k;
+    const mw = metres(); mw.d.cut = null; const whole = C.build(mw.d); whole.k = built.k; stampPacks(whole);
     put('map', await pack(whole.blob)); put('over', await pack(a.over)); if (b) put('over2', await pack(b.over));
     // (v0.6) THE LAYERS (see LAB above): with them the game makes each feature a gene. "feat" lists what this fish has.
     LAB = { A: new Uint8ClampedArray(W * H * 3), P: new Uint8ClampedArray(W * H * 3), M: new Uint8ClampedArray(W * H * 3), E: new Uint8ClampedArray(W * H * 4), C: new Uint8ClampedArray(W * H) };
@@ -674,13 +736,16 @@
       return out;
     };
     // "feat": what this fish has. Names for the general features; s16.. = fin 1.. is there (s27 the tail), s28.. = that fin's own look (s39 the tail's)
-    const anyCut = cut.some(v => v), feat = ['bodycol', 'fincol'], finLook = f => (f.rays == null ? D.look.rays : f.rays) > 0.02 || (f.clear || 0) > 0.01, hasBrush = L.A.paint.some((v, i) => (i & 3) === 3 && v > 8);
+    const anyCut = cut.some(v => v), feat = ['bodycol', 'fincol'], finLook = f => (f.rays == null ? D.look.rays : f.rays) > 0.02 || (f.clear || 0) > 0.01, finBrush = D.fins.some(f => f.id && finPaint[f.id] && finPaint[f.id].paint.some((v, i) => (i & 3) === 3 && v > 8)), hasBrush = finBrush || L.A.paint.some((v, i) => (i & 3) === 3 && v > 8);
     if (D.look.scales > 0.02) feat.push('scales'); if (anyCut) feat.push('cut'); if (hasBrush) feat.push('brush'); if (a.any) feat.push('glow', 'glowlit');
     if (eyes.length) feat.push('eyecol'); if (eyes.some(e => e.type !== 'round')) feat.push('eyekind'); if (eyes.length > 1) feat.push('eyemore');
     D.fins.slice(0, 11).forEach((f, i) => { feat.push('s' + (16 + i)); if (finLook(f)) feat.push('s' + (28 + i)); }); if (D.tail) { feat.push('s27'); if (finLook(D.tail)) feat.push('s39'); }
     put('feat', feat.join(',')); put('la', await pack(u8(lab.A))); put('lp', await pack(u8(lab.P))); put('lm', await pack(u8(lab.M))); put('lc', await pack(u8(lab.C))); put('lo', await pack(whole.own));
     for (const more of [0, 1]) for (const form of [0, 1]) for (const colr of [0, 1]) { const list = more ? eyes.slice(1) : eyes.slice(0, 1); if (list.length) put('e' + (more ? 'x' : 'f') + (form ? 'd' : 'p') + (colr ? 'd' : 'p'), await pack(u8(eyeLayer(list, !!form, !!colr)))); }
-    if (hasBrush) put('lb', await pack(u8(L.A.paint))); if (a.any) put('lg', await pack(u8(L.A.gimg))); if (anyCut) put('lx', await pack(cut));
+    // the brush layer for the game: the main sheet, and on every fin's patch what is painted on that fin
+    const lbOut = L.A.paint.slice(); for (let i = 0; i < W * H; i++) { const pk = whole.cls[i] === 254 ? packs[whole.own[i]] : null, fin = pk ? D.fins[whole.own[i] - 2] : null, lay = fin && fin.id ? finPaint[fin.id] : null; if (!lay) continue; const x = i % W, y = (i - x) / W, q = flIndex(pk.z0 + (x + 0.5 - pk.x0 - 2) / pk.den - pk.zc, Math.max(0, (pk.y0 + pk.h - 2 - (y + 0.5)) / pk.den)); if (q >= 0) for (let c = 0; c < 4; c++) lbOut[i * 4 + c] = lay.paint[q + c]; }
+    for (const f of D.fins) if (f.id && finPaint[f.id] && offFin(f)) { put('fp.' + f.id, await pack(u8(finPaint[f.id].paint))); put('fg.' + f.id, await pack(u8(finPaint[f.id].glow))); }
+    if (hasBrush) put('lb', await pack(u8(lbOut))); if (a.any) put('lg', await pack(u8(L.A.gimg))); if (anyCut) put('lx', await pack(cut));
     if (!D.look.glowLit) { put('lit', await pack(a.lit)); if (b) put('lit2', await pack(b.lit)); }
     for (let s = 0; s < 6; s++) put('m' + s, await pack(C.writeMwm(PAT, built.slices[s])));
     D.v = 4; put('design', await pack(new TextEncoder().encode(JSON.stringify(D)))); put('paint', await pack(new Uint8Array(L.A.paint.buffer.slice(0)))); put('glowrgba', await pack(new Uint8Array(L.A.glow.buffer.slice(0))));
@@ -694,9 +759,9 @@
     const d = JSON.parse(new TextDecoder().decode(await unpack(kv.design))); if (!d.body || !d.look) throw new Error('the design inside it is damaged');
     remember(true); const f = fresh(); D = Object.assign(f, d); D.look = Object.assign(fresh().look, d.look); D.body = Object.assign(fresh().body, d.body); if (!Array.isArray(D.palette)) D.palette = fresh().palette; if (typeof D.skinMirror !== 'boolean') D.skinMirror = true; if (!Array.isArray(D.eyes)) D.eyes = null;
     if (!d.body.width) { const t = C.curve(d.body.top), b = C.curve(d.body.bot), w0 = d.body.wide || 0.7; D.body.width = d.body.top.map(p => [p[0], Math.max(0.004, w0 * (t(p[0]) - b(p[0])) / 2)]); D.body.wide = 1.0; D.body.widthL = null; }
-    ['A', 'B'].forEach(k => { L[k].paint.fill(0); L[k].glow.fill(0); }); cut.fill(0);
+    ['A', 'B'].forEach(k => { L[k].paint.fill(0); L[k].glow.fill(0); }); cut.fill(0); for (const id in finPaint) delete finPaint[id];
     const load = async (key, arr) => { if (kv[key]) { const p = await unpack(kv[key]); if (p.length === arr.length) arr.set(p); } };
-    await load('paint', L.A.paint); await load('paint2', L.B.paint); await load('glowrgba', L.A.glow); await load('glowrgba2', L.B.glow); await load('fincut', cut);
+    await load('paint', L.A.paint); await load('paint2', L.B.paint); await load('glowrgba', L.A.glow); await load('glowrgba2', L.B.glow); await load('fincut', cut); for (const fn of D.fins) if (fn.id && kv['fp.' + fn.id]) { const lay = finLay(fn); await load('fp.' + fn.id, lay.paint); await load('fg.' + fn.id, lay.glow); }
     // a file from before v0.4: its glow was one number per dot. v0.3 kept the glow's colour in the paint; the first version had one glow colour.
     const old = async (key, K) => { if (!kv[key] || kv.glowrgba) return; const g = await unpack(kv[key]); if (g.length !== W * H) return; const gc = d.look.glow && !d.v ? hex(d.look.glow) : null; for (let i = 0; i < W * H; i++) if (g[i]) { const o = i * 4; for (let c = 0; c < 3; c++) K.glow[o + c] = gc ? gc[c] : K.paint[o + c]; K.glow[o + 3] = g[i]; } };
     await old('glowlayer', L.A); await old('glowlayer2', L.B);
@@ -725,6 +790,6 @@
     if (dirtySkin && built) compositeAll();
     drawTank(now); requestAnimationFrame(frame);
   }
-  window.FishLab = { fileText, openText, get design() { return D; }, view: () => [yaw, pitch, zoom, panX, panY].map(v => Math.round(v * 100) / 100), sel: () => [tab, selFin, selEye], undo, unpack: s => unpack(s), layers: L, cut, sheet: () => [paintView, SV.zoom, SV.px, SV.py].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v), skinAt: (x, y) => skinAt(x, y) };
+  window.FishLab = { fileText, openText, get design() { return D; }, view: () => [yaw, pitch, zoom, panX, panY].map(v => Math.round(v * 100) / 100), sel: () => [tab, selFin, selEye], undo, packs: () => JSON.stringify(Object.keys(packs).map(k => [+k, packs[k].x0, packs[k].y0, packs[k].w, packs[k].h, packs[k].sc])), finPaint, unpack: s => unpack(s), layers: L, cut, sheet: () => [paintView, SV.zoom, SV.px, SV.py].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v), skinAt: (x, y) => skinAt(x, y) };
   requestAnimationFrame(frame);
 })();
