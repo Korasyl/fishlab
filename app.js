@@ -1,4 +1,4 @@
-// ARCA FISH LAB v0.5 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
+// ARCA FISH LAB v0.6 - the app. The design lives in a fixed drawing frame 1 unit wide (so paint keeps its place when the shape
 // changes); "Length in game" scales it to metres when it is built. FishCore (fishcore.js) does the building.
 // The skin picture is drawn as the fish's LEFT side (nose to the left). Side A = the left flank, side B = the right flank; with
 // "Same skin on both sides" on, B is A.
@@ -102,40 +102,57 @@
   }
   // ---- THE SKIN of one side: base colours shaded by the map, then your paint, then the eye. This is what the game will show. ----
   const EYES = [['round', 'Round'], ['slit', 'Slit'], ['bar', 'Bar'], ['ring', 'Ringed'], ['bead', 'Bead'], ['compound', 'Compound'], ['blank', 'Blank']];
+  // one dot of an eye: how much ring, iris and pupil there is at (dx, dy) from its middle (in eye radii), and whether the glint is there
+  function eyeParts(t, dx, dy, dd) {
+    const blank = t === 'blank', ring = blank ? 0 : sm(1.25 - dd, 0, 0.2), iris = sm(1.0 - dd, 0, 0.15), hl = !blank && t !== 'compound' && Math.hypot(dx + 0.3, dy + 0.3) < 0.18; let pup = 0;
+    if (t === 'round') pup = sm(0.5 - dd, 0, 0.12);
+    else if (t === 'slit') pup = sm(1 - Math.hypot(dx / 0.24, dy / 0.9), 0, 0.3);
+    else if (t === 'bar') pup = sm(1 - Math.hypot(dx / 0.85, dy / 0.26), 0, 0.3);
+    else if (t === 'ring') pup = Math.max(sm(0.28 - dd, 0, 0.1), sm(0.11 - Math.abs(dd - 0.7), 0, 0.07));
+    else if (t === 'bead') pup = 0.88 * sm(0.92 - dd, 0, 0.12);
+    else if (t === 'compound') { const v = dy * 3.2 + 100, row = Math.floor(v), u = dx * 3.2 + 100 + (row % 2) * 0.5, fu = u - Math.floor(u) - 0.5, fv = v - row - 0.5; pup = 0.75 * sm(Math.hypot(fu, fv), 0.3, 0.5); }
+    return [ring, iris, pup, hl ? 1 : 0];
+  }
+  // THE FISH IN LAYERS, for the game (v0.6). In the game every feature of a Lab fish is a gene with two versions - as designed here,
+  // or plain - so the game must be able to put a fish together feature by feature. While LAB is set, composite() also fills:
+  //   A = the colours as picked (no shading), P = the pale colours of a plain fish, M = three shadings per dot (always / scales / rays),
+  //   E = the eyes (colour + how much), C = how solid each dot is (see-through fins).
+  let LAB = null;
+  const pale = (r, g, b) => { const l = 0.3 * r + 0.59 * g + 0.11 * b; return [r, g, b].map(v => { const q = l + (v - l) * 0.25; return q + (238 - q) * 0.5; }); };
   function composite(key) {
     if (!built) return;
     const K = L[key], paint = K.paint, glow = K.glow, skin = K.skin, gimg = K.gimg, Lk = D.look, cb = hex(Lk.back), cf = hex(Lk.flank), cl = hex(Lk.belly), cn = hex(Lk.fin), ct = hex(Lk.tip), cls = built.cls, own = built.own, Dm = built.Dm, Rm = built.Rm, tr = built.topr, br = built.botr;
     const er0 = built.tables.eye[2], eyes = (D.eyes || []).map(e => { const q = toPic(e.p); return { x: q[0], y: q[1], r: Math.max(1.5, er0 * e.size), c: hex(e.col), rc: hex(e.ring || '#14181c'), pc: hex(e.pup || '#000000'), t: e.type }; });
     const fcache = {}, fp = o => { const f = (o === 250 ? D.tail : D.fins[o - 2]) || {}; return { a: 255 * (1 - clamp(f.clear || 0, 0, 0.95)), rays: f.rays == null ? Lk.rays : f.rays, rn: f.rayN || 1 }; };
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = y * W + x, o = i * 4, c = cls[i]; let r = 0, g = 0, b = 0, a = 0;
+      const i = y * W + x, o = i * 4, c = cls[i]; let r = 0, g = 0, b = 0, a = 0, ar = 0, ag = 0, ab = 0, ks = 1, kr = 1, ksh = 1, ecol = null, ealpha = 0;
       if (c === 255) {
         const rel = clamp((y + 0.5 - tr[x]) / Math.max(1, br[x] - tr[x]), 0, 1), t1 = sm(rel, 0.12, 0.5), t2 = sm(rel, 0.58, 0.92);
         r = cb[0] + (cf[0] - cb[0]) * t1; g = cb[1] + (cf[1] - cb[1]) * t1; b = cb[2] + (cf[2] - cb[2]) * t1;
-        r += (cl[0] - r) * t2; g += (cl[1] - g) * t2; b += (cl[2] - b) * t2;
-        if (Lk.scales > 0) { const depth = Math.max(8, br[x] - tr[x]), cs = Math.max(4, depth / 9), row = Math.floor((y - tr[x]) / cs), u = (x + (row % 2) * cs / 2) / cs, v = (y - tr[x]) / cs; const du = u - Math.floor(u) - 0.5, dv = v - Math.floor(v) - 0.1, rim = Math.abs(Math.hypot(du, dv * 0.9) - 0.5); const k = 1 - Lk.scales * 0.35 * (1 - sm(rim, 0.0, 0.14)) * (1 - t2 * 0.6); r *= k; g *= k; b *= k; }
-        const sh = 1 - 0.18 * Math.pow(Math.abs(rel - 0.42) * 1.6, 2); r *= sh; g *= sh; b *= sh; a = 255;
-      } else if ((c === 100 || c === 140 || c === 180) && !cut[i]) {
+        r += (cl[0] - r) * t2; g += (cl[1] - g) * t2; b += (cl[2] - b) * t2; ar = r; ag = g; ab = b;
+        if (Lk.scales > 0) { const depth = Math.max(8, br[x] - tr[x]), cs = Math.max(4, depth / 9), row = Math.floor((y - tr[x]) / cs), u = (x + (row % 2) * cs / 2) / cs, v = (y - tr[x]) / cs; const du = u - Math.floor(u) - 0.5, dv = v - Math.floor(v) - 0.1, rim = Math.abs(Math.hypot(du, dv * 0.9) - 0.5); const k = 1 - Lk.scales * 0.35 * (1 - sm(rim, 0.0, 0.14)) * (1 - t2 * 0.6); ks = k; r *= k; g *= k; b *= k; }
+        const sh = 1 - 0.18 * Math.pow(Math.abs(rel - 0.42) * 1.6, 2); ksh = sh; r *= sh; g *= sh; b *= sh; a = 255;
+      } else if ((c === 100 || c === 140 || c === 180) && (LAB || !cut[i])) {
         const F = fcache[own[i]] || (fcache[own[i]] = fp(own[i])), d = Dm[i], t = sm(d, 0.45, 1.0); r = cn[0] + (ct[0] - cn[0]) * t; g = cn[1] + (ct[1] - cn[1]) * t; b = cn[2] + (ct[2] - cn[2]) * t;
-        const p = Rm[i] * (c === 180 ? 26 : 60) * F.rn, f = p - Math.floor(p), ray = sm(1 - Math.abs(f - 0.5) / (0.16 + 0.1 * (1 - d)), 0, 1) * F.rays, k = 1 - 0.42 * ray; r *= k; g *= k; b *= k;
+        const p = Rm[i] * (c === 180 ? 26 : 60) * F.rn, f = p - Math.floor(p), ray = sm(1 - Math.abs(f - 0.5) / (0.16 + 0.1 * (1 - d)), 0, 1) * F.rays, k = 1 - 0.42 * ray; ar = r; ag = g; ab = b; kr = k; r *= k; g *= k; b *= k;
         a = F.a + (255 - F.a) * ray * 0.5;      // a see-through fin: the rays stay more solid than the skin between them
       } else if (c === 254 && swMap[own[i]]) {
         // a swatch: the look of a fin off the centre line. Along the strip = round the fan (the rays), across it = root to tip.
         const w = swMap[own[i]], F = fcache[own[i]] || (fcache[own[i]] = fp(own[i])), d = clamp(w.vert ? (x - w.x0) / (w.x1 - w.x0) : (y - w.y0) / (w.y1 - w.y0), 0, 1), al = clamp(w.vert ? (y - w.y0) / (w.y1 - w.y0) : (x - w.x0) / (w.x1 - w.x0), 0, 1), t = sm(d, 0.45, 1.0);
         r = cn[0] + (ct[0] - cn[0]) * t; g = cn[1] + (ct[1] - cn[1]) * t; b = cn[2] + (ct[2] - cn[2]) * t;
-        const p = al * 14 * F.rn, f = p - Math.floor(p), ray = sm(1 - Math.abs(f - 0.5) / 0.22, 0, 1) * F.rays, k = 1 - 0.42 * ray; r *= k; g *= k; b *= k; a = F.a + (255 - F.a) * ray * 0.5;
+        const p = al * 14 * F.rn, f = p - Math.floor(p), ray = sm(1 - Math.abs(f - 0.5) / 0.22, 0, 1) * F.rays, k = 1 - 0.42 * ray; ar = r; ag = g; ab = b; kr = k; r *= k; g *= k; b *= k; a = F.a + (255 - F.a) * ray * 0.5;
       }
       if (a && c !== 254) { const pa = paint[o + 3] / 255; r += (paint[o] - r) * pa; g += (paint[o + 1] - g) * pa; b += (paint[o + 2] - b) * pa; }
       if (a && c === 255) for (let n = 0; n < eyes.length; n++) {
         const e = eyes[n], dx = (x + 0.5 - e.x) / e.r, dy = (y + 0.5 - e.y) / e.r, dd = Math.hypot(dx, dy); if (dd >= 1.25) continue;
-        const blank = e.t === 'blank', ring = blank ? 0 : sm(1.25 - dd, 0, 0.2), iris = sm(1.0 - dd, 0, 0.15), hl = !blank && e.t !== 'compound' && Math.hypot(dx + 0.3, dy + 0.3) < 0.18; let pup = 0;      // a blank eye: neither ring nor pupil
-        if (e.t === 'round') pup = sm(0.5 - dd, 0, 0.12);
-        else if (e.t === 'slit') pup = sm(1 - Math.hypot(dx / 0.24, dy / 0.9), 0, 0.3);
-        else if (e.t === 'bar') pup = sm(1 - Math.hypot(dx / 0.85, dy / 0.26), 0, 0.3);
-        else if (e.t === 'ring') pup = Math.max(sm(0.28 - dd, 0, 0.1), sm(0.11 - Math.abs(dd - 0.7), 0, 0.07));
-        else if (e.t === 'bead') pup = 0.88 * sm(0.92 - dd, 0, 0.12);
-        else if (e.t === 'compound') { const v = dy * 3.2 + 100, row = Math.floor(v), u = dx * 3.2 + 100 + (row % 2) * 0.5, fu = u - Math.floor(u) - 0.5, fv = v - row - 0.5; pup = 0.75 * sm(Math.hypot(fu, fv), 0.3, 0.5); }
+        const [ring, iris, pup, hl] = eyeParts(e.t, dx, dy, dd);
         r += (e.rc[0] - r) * ring; g += (e.rc[1] - g) * ring; b += (e.rc[2] - b) * ring; r += (e.c[0] - r) * iris; g += (e.c[1] - g) * iris; b += (e.c[2] - b) * iris; r += (e.pc[0] - r) * pup; g += (e.pc[1] - g) * pup; b += (e.pc[2] - b) * pup; if (hl) { r = g = b = 240; }
+        if (LAB) { if (!ecol) ecol = [0, 0, 0]; [[e.rc, ring], [e.c, iris], [e.pc, pup], [[240, 240, 240], hl]].forEach(([cc, tt]) => { for (let q = 0; q < 3; q++) ecol[q] = ecol[q] * (1 - tt) + cc[q] * tt; ealpha = ealpha * (1 - tt) + tt; }); }
+      }
+      if (LAB && a) {
+        const q3 = i * 3, pl = pale(ar, ag, ab); LAB.A[q3] = ar; LAB.A[q3 + 1] = ag; LAB.A[q3 + 2] = ab; LAB.P[q3] = pl[0]; LAB.P[q3 + 1] = pl[1]; LAB.P[q3 + 2] = pl[2];
+        LAB.M[q3] = ksh * 255; LAB.M[q3 + 1] = ks * 255; LAB.M[q3 + 2] = kr * 255; LAB.C[i] = c === 255 ? 255 : a;
+        if (ecol && ealpha > 0.004) { LAB.E[o] = ecol[0] / ealpha; LAB.E[o + 1] = ecol[1] / ealpha; LAB.E[o + 2] = ecol[2] / ealpha; LAB.E[o + 3] = ealpha * 255; }
       }
       skin[o] = r; skin[o + 1] = g; skin[o + 2] = b; skin[o + 3] = a;
       gimg[o] = glow[o]; gimg[o + 1] = glow[o + 1]; gimg[o + 2] = glow[o + 2]; gimg[o + 3] = a && c !== 254 ? glow[o + 3] : 0;
@@ -635,7 +652,26 @@
     if (!rebuild()) throw new Error('the shape cannot be built'); compositeAll(); const t = built.tables, lines = ['ARCAFISH 1'], put = (k, v) => lines.push(k + '=' + v), a = overOf(L.A), b = D.skinMirror ? null : overOf(L.B);
     put('name', D.name.replace(/[=\r\n|]/g, ' ').trim() || 'Unnamed'); put('len', (D.lenCm / 100).toFixed(4)); put('pace', D.pace.toFixed(2)); put('wag', D.wag.toFixed(2)); put('glowhue', '0.500'); put('glows', a.any || (b && b.any) ? 1 : 0); put('glowlit', D.look.glowLit ? 1 : 0); put('twoside', b ? 1 : 0);
     put('asp', t.asp); put('eye', t.eye.join(',')); put('span', t.span.join(',')); put('head', t.head); put('cut', t.cut.join(',')); put('fin', t.fin.join(',')); put('brow', t.brow.join(','));
-    put('map', await pack(built.blob)); put('over', await pack(a.over)); if (b) put('over2', await pack(b.over));
+    // the map goes out with the fins WHOLE: in the game the cuts are a feature of their own (the layer lx), which a fish may lack
+    const mw = metres(); mw.d.cut = null; const whole = C.build(mw.d); whole.k = built.k;
+    put('map', await pack(whole.blob)); put('over', await pack(a.over)); if (b) put('over2', await pack(b.over));
+    // (v0.6) THE LAYERS (see LAB above): with them the game makes each feature a gene. "feat" lists what this fish has.
+    LAB = { A: new Uint8ClampedArray(W * H * 3), P: new Uint8ClampedArray(W * H * 3), M: new Uint8ClampedArray(W * H * 3), E: new Uint8ClampedArray(W * H * 4), C: new Uint8ClampedArray(W * H) };
+    const cutBuild = built; built = whole; composite('A'); built = cutBuild; const lab = LAB; LAB = null; dirtySkin = true; const Q = new Uint8ClampedArray(W * H * 4), eyes = D.eyes || [], u8 = x => new Uint8Array(x.buffer, 0, x.length);
+    if (eyes.length) {      // the plain eye: one dark round eye where the first eye is
+      const q = toPic(eyes[0].p), er = Math.max(1.5, built.tables.eye[2] * eyes[0].size), rc = [20, 24, 28], ic = [58, 64, 70], pc = [0, 0, 0];
+      for (let y = Math.max(0, Math.floor(q[1] - er * 1.3)); y <= Math.min(H - 1, Math.ceil(q[1] + er * 1.3)); y++) for (let x = Math.max(0, Math.floor(q[0] - er * 1.3)); x <= Math.min(W - 1, Math.ceil(q[0] + er * 1.3)); x++) {
+        const i = y * W + x; if (built.cls[i] !== 255) continue; const dx = (x + 0.5 - q[0]) / er, dy = (y + 0.5 - q[1]) / er, dd = Math.hypot(dx, dy); if (dd >= 1.25) continue;
+        const [ring, iris, pup, hl] = eyeParts('round', dx, dy, dd), col = [0, 0, 0]; let al = 0; [[rc, ring], [ic, iris], [pc, pup], [[240, 240, 240], hl]].forEach(([cc, tt]) => { for (let k = 0; k < 3; k++) col[k] = col[k] * (1 - tt) + cc[k] * tt; al = al * (1 - tt) + tt; });
+        if (al > 0.004) { Q[i * 4] = col[0] / al; Q[i * 4 + 1] = col[1] / al; Q[i * 4 + 2] = col[2] / al; Q[i * 4 + 3] = al * 255; }
+      }
+    }
+    const allFins = D.fins.concat(D.tail ? [D.tail] : []), anyCut = cut.some(v => v), feat = ['bodycol', 'fincol'];
+    if (D.look.scales > 0.02) feat.push('scales'); if (allFins.some(f => (f.rays == null ? D.look.rays : f.rays) > 0.02)) feat.push('rays'); if (allFins.some(f => (f.clear || 0) > 0.01)) feat.push('clear');
+    if (anyCut) feat.push('cut'); if (eyes.length) feat.push('eyes'); if (L.A.paint.some((v, i) => (i & 3) === 3 && v > 8)) feat.push('brush'); if (a.any) feat.push('glow');
+    put('feat', feat.join(',')); put('la', await pack(u8(lab.A))); put('lp', await pack(u8(lab.P))); put('lm', await pack(u8(lab.M))); put('lc', await pack(u8(lab.C)));
+    if (eyes.length) { put('le', await pack(u8(lab.E))); put('lq', await pack(u8(Q))); }
+    if (feat.includes('brush')) put('lb', await pack(u8(L.A.paint))); if (a.any) put('lg', await pack(u8(L.A.gimg))); if (anyCut) put('lx', await pack(cut));
     if (!D.look.glowLit) { put('lit', await pack(a.lit)); if (b) put('lit2', await pack(b.lit)); }
     for (let s = 0; s < 6; s++) put('m' + s, await pack(C.writeMwm(PAT, built.slices[s])));
     D.v = 4; put('design', await pack(new TextEncoder().encode(JSON.stringify(D)))); put('paint', await pack(new Uint8Array(L.A.paint.buffer.slice(0)))); put('glowrgba', await pack(new Uint8Array(L.A.glow.buffer.slice(0))));
@@ -680,6 +716,6 @@
     if (dirtySkin && built) compositeAll();
     drawTank(now); requestAnimationFrame(frame);
   }
-  window.FishLab = { fileText, openText, get design() { return D; }, view: () => [yaw, pitch, zoom, panX, panY].map(v => Math.round(v * 100) / 100), sel: () => [tab, selFin, selEye], undo, layers: L, cut, sheet: () => [paintView, SV.zoom, SV.px, SV.py].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v), skinAt: (x, y) => skinAt(x, y) };
+  window.FishLab = { fileText, openText, get design() { return D; }, view: () => [yaw, pitch, zoom, panX, panY].map(v => Math.round(v * 100) / 100), sel: () => [tab, selFin, selEye], undo, unpack: s => unpack(s), layers: L, cut, sheet: () => [paintView, SV.zoom, SV.px, SV.py].map(v => typeof v === 'number' ? Math.round(v * 100) / 100 : v), skinAt: (x, y) => skinAt(x, y) };
   requestAnimationFrame(frame);
 })();
