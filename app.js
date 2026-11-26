@@ -63,7 +63,7 @@
   function composite(key) {
     if (!built) return;
     const K = L[key], paint = K.paint, glow = K.glow, skin = K.skin, gimg = K.gimg, Lk = D.look, cb = hex(Lk.back), cf = hex(Lk.flank), cl = hex(Lk.belly), cn = hex(Lk.fin), ct = hex(Lk.tip), cls = built.cls, own = built.own, Dm = built.Dm, Rm = built.Rm, tr = built.topr, br = built.botr;
-    const er0 = built.tables.eye[2], eyes = (D.eyes || []).map(e => { const q = toPic(e.p); return { x: q[0], y: q[1], r: Math.max(1.5, er0 * e.size), c: hex(e.col), t: e.type }; });
+    const er0 = built.tables.eye[2], eyes = (D.eyes || []).map(e => { const q = toPic(e.p); return { x: q[0], y: q[1], r: Math.max(1.5, er0 * e.size), c: hex(e.col), rc: hex(e.ring || '#14181c'), pc: hex(e.pup || '#000000'), t: e.type }; });
     const fcache = {}, fp = o => { const f = (o === 250 ? D.tail : D.fins[o - 2]) || {}; return { a: 255 * (1 - clamp(f.clear || 0, 0, 0.95)), rays: f.rays == null ? Lk.rays : f.rays, rn: f.rayN || 1 }; };
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = y * W + x, o = i * 4, c = cls[i]; let r = 0, g = 0, b = 0, a = 0;
@@ -81,14 +81,14 @@
       if (a) { const pa = paint[o + 3] / 255; r += (paint[o] - r) * pa; g += (paint[o + 1] - g) * pa; b += (paint[o + 2] - b) * pa; }
       if (a && c === 255) for (let n = 0; n < eyes.length; n++) {
         const e = eyes[n], dx = (x + 0.5 - e.x) / e.r, dy = (y + 0.5 - e.y) / e.r, dd = Math.hypot(dx, dy); if (dd >= 1.25) continue;
-        const ring = sm(1.25 - dd, 0, 0.2), iris = sm(1.0 - dd, 0, 0.15), hl = e.t !== 'compound' && Math.hypot(dx + 0.3, dy + 0.3) < 0.18; let pup = 0;
+        const blank = e.t === 'blank', ring = blank ? 0 : sm(1.25 - dd, 0, 0.2), iris = sm(1.0 - dd, 0, 0.15), hl = !blank && e.t !== 'compound' && Math.hypot(dx + 0.3, dy + 0.3) < 0.18; let pup = 0;      // a blank eye: neither ring nor pupil
         if (e.t === 'round') pup = sm(0.5 - dd, 0, 0.12);
         else if (e.t === 'slit') pup = sm(1 - Math.hypot(dx / 0.24, dy / 0.9), 0, 0.3);
         else if (e.t === 'bar') pup = sm(1 - Math.hypot(dx / 0.85, dy / 0.26), 0, 0.3);
         else if (e.t === 'ring') pup = Math.max(sm(0.28 - dd, 0, 0.1), sm(0.11 - Math.abs(dd - 0.7), 0, 0.07));
         else if (e.t === 'bead') pup = 0.88 * sm(0.92 - dd, 0, 0.12);
         else if (e.t === 'compound') { const v = dy * 3.2 + 100, row = Math.floor(v), u = dx * 3.2 + 100 + (row % 2) * 0.5, fu = u - Math.floor(u) - 0.5, fv = v - row - 0.5; pup = 0.75 * sm(Math.hypot(fu, fv), 0.3, 0.5); }
-        r += (20 - r) * ring; g += (24 - g) * ring; b += (28 - b) * ring; r += (e.c[0] - r) * iris; g += (e.c[1] - g) * iris; b += (e.c[2] - b) * iris; r *= 1 - pup; g *= 1 - pup; b *= 1 - pup; if (hl) { r = g = b = 240; }
+        r += (e.rc[0] - r) * ring; g += (e.rc[1] - g) * ring; b += (e.rc[2] - b) * ring; r += (e.c[0] - r) * iris; g += (e.c[1] - g) * iris; b += (e.c[2] - b) * iris; r += (e.pc[0] - r) * pup; g += (e.pc[1] - g) * pup; b += (e.pc[2] - b) * pup; if (hl) { r = g = b = 240; }
       }
       skin[o] = r; skin[o + 1] = g; skin[o + 2] = b; skin[o + 3] = a;
       gimg[o] = glow[o]; gimg[o + 1] = glow[o + 1]; gimg[o + 2] = glow[o + 2]; gimg[o + 3] = a ? glow[o + 3] : 0;
@@ -119,7 +119,7 @@
     return hs;
   }
   function removeHandle(h) {
-    if (h.kind === 'eye') { remember(false); D.eyes.splice(h.i, 1); selEye = 0; if (lookSel === 'eye') lookSel = 'back'; eyeUI(); pickLook(); dirtySkin = true; say('Eye removed.'); return; }
+    if (h.kind === 'eye') { remember(false); D.eyes.splice(h.i, 1); selEye = 0; if (EP[lookSel]) lookSel = 'back'; eyeUI(); pickLook(); dirtySkin = true; say('Eye removed.'); return; }
     if (h.kind === 'fin') { const last = h.f === D.tail ? -1 : h.f.pts.length - 1; if (h.f.pts.length <= 3 || h.i === 0 || h.i === last) { say('A fin keeps at least three handles, and the two that sit on the body stay.'); return; } remember(false); h.f.pts.splice(h.i, 1); }
     else { const s = h.arr.slice().sort((a, b) => a[0] - b[0]); if (h.arr.length <= 3 || h.p === s[0] || h.p === s[s.length - 1]) { say('The handles at the nose and at the tail end stay, and each line keeps at least three.'); return; } remember(false); h.arr.splice(h.arr.indexOf(h.p), 1); }
     dirtyShape = true; say('Handle removed.');
@@ -183,7 +183,7 @@
 
   // ---- THE 3D WORKSPACE: the six slices, hinged and waved as the plugin does it, wearing the skin. On the Shape, Fins, Skin and
   // Paint tabs it holds still and is worked on directly. ----
-  const tk = $('tank'), hud = $('hud'), hx = hud.getContext('2d'), gl = tk.getContext('webgl', { antialias: true, alpha: false });
+  const tk = $('tank'), hud = $('hud'), hx = hud.getContext('2d'), gl = tk.getContext('webgl', { antialias: true, alpha: false, stencil: true });
   let prog = null, pick = null, fbo = null, fboTex = null, fboDepth = null, bufs = [], tx = {}, yaw = -0.9, pitch = 0.22, zoom = 1, panX = 0, panY = 0, T0 = performance.now();
   let MV = null, lastMats = null, d3 = { drag: null, orbit: false, st: null, hot: null, cur: null, moved: false };
   const VS = 'attribute vec3 p;attribute vec3 n;attribute vec2 u;uniform mat4 mvp;uniform mat4 mdl;varying vec2 vu;varying vec3 vn;varying float vx;void main(){vu=u;vx=p.x;vn=mat3(mdl)*n;gl_Position=mvp*vec4(p,1.0);}';
@@ -240,7 +240,7 @@
     // (Motion tab, Lights off) - and while they are being painted (Paint tab, Glow brush).
     const dark = tab === 'move' && pressed('v-dark') ? 1 : 0, gshow = D.look.glowLit || dark || (tab === 'paint' && mode === 'glow') ? 1 : 0;
     const t = (now - T0) / 1000, reduce = matchMedia('(prefers-reduced-motion: reduce)').matches, hold = still(), sheet = sheetOn();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, tk.width, tk.height); gl.clearColor(0.02 + 0.03 * (1 - dark), 0.09 * (1 - dark) + 0.02, 0.13 * (1 - dark) + 0.03, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, tk.width, tk.height); gl.clearColor(0.02 + 0.03 * (1 - dark), 0.09 * (1 - dark) + 0.02, 0.13 * (1 - dark) + 0.03, 1); gl.clearStencil(0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
     lastViews = [];
     if (sheet) {
       const h2 = Math.floor(tk.height / 2), k = built.k, defs = paintView === 'lr' ? [[Math.PI / 2, 0, 1, 1, 'Left side'], [-Math.PI / 2, 0, -1, 1, 'Right side']] : [[Math.PI / 2, Math.PI / 2, 1, 1, 'From above'], [Math.PI / 2, -Math.PI / 2, 1, -1, 'From below']];
@@ -263,7 +263,8 @@
     lastMats = lastViews[0].mats;
     gl.useProgram(prog); const U = n => gl.getUniformLocation(prog, n); gl.uniform1f(U('dark'), dark); gl.uniform1f(U('gshow'), gshow); gl.uniform1f(U('unlit'), sheet ? 1 : 0);
     gl.uniform1f(U('tp'), 0); render(prog);
-    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); gl.useProgram(prog); gl.uniform1f(U('tp'), 1); render(prog); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); gl.enable(gl.STENCIL_TEST); gl.stencilFunc(gl.EQUAL, 0, 0xff); gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);      // the stencil: a dot that has had its see-through layer takes no second one
+    gl.useProgram(prog); gl.uniform1f(U('tp'), 1); render(prog); gl.disable(gl.STENCIL_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
     drawHud();
   }
   // where the pointer touches the fish's skin: the model is drawn once more with every dot coloured by its own place in the picture
@@ -408,21 +409,27 @@
   const LOOKS = [['back', 'Back'], ['flank', 'Flank'], ['belly', 'Belly'], ['fin', 'Fins'], ['tip', 'Fin tips']]; let lookSel = 'back';
   function swatches() {
     const row = $('lookrow'); row.textContent = ''; LOOKS.forEach(([k, name]) => { const w = document.createElement('div'); w.style.textAlign = 'center'; const b = document.createElement('button'); b.className = 'sw'; b.style.background = D.look[k]; b.setAttribute('aria-pressed', lookSel === k ? 'true' : 'false'); b.setAttribute('aria-label', name + ' colour'); b.addEventListener('click', () => { lookSel = k; pickLook(); }); const s = document.createElement('div'); s.textContent = name; s.style.cssText = 'font-size:11.5px;color:var(--dim)'; w.appendChild(b); w.appendChild(s); row.appendChild(w); });
-    const e = D.eyes && D.eyes[selEye]; $('eyecol').style.background = e ? e.col : 'transparent'; $('eyecol').setAttribute('aria-pressed', lookSel === 'eye' ? 'true' : 'false');
+    eyeCols();
+  }
+  // an eye's three colours: which field of the eye, its name, and what it is when the eye has none of its own
+  const EP = { eye: ['col', 'Iris', '#f2b84b'], eyering: ['ring', 'Ring', '#14181c'], eyepup: ['pup', 'Pupil', '#000000'] };
+  function eyeCols() {
+    const row = $('eyecols'); row.textContent = ''; const e = (D.eyes || [])[selEye];
+    Object.keys(EP).forEach(k => { const f = EP[k], w = document.createElement('div'); w.style.textAlign = 'center'; const b = document.createElement('button'); b.className = 'sw'; b.style.background = e ? e[f[0]] || f[2] : 'transparent'; b.disabled = !e || (e.type === 'blank' && k !== 'eye'); b.setAttribute('aria-pressed', lookSel === k ? 'true' : 'false'); b.setAttribute('aria-label', f[1] + ' colour of the selected eye'); b.addEventListener('click', () => { lookSel = k; pickLook(); }); const t = document.createElement('div'); t.textContent = f[1]; t.style.cssText = 'font-size:11.5px;color:var(--dim)'; w.appendChild(b); w.appendChild(t); row.appendChild(w); });
   }
   function pickLook() {
-    if (lookSel === 'eye' && !(D.eyes && D.eyes[selEye])) lookSel = 'back';
-    if (lookSel === 'eye') pickOpen('pickhome-eye', { name: 'Eye ' + (selEye + 1) + ' colour', undo: true, get: () => (D.eyes[selEye] || {}).col || '#f2b84b', set: v => { if (D.eyes[selEye]) { D.eyes[selEye].col = v; dirtySkin = true; } } });
+    const e = D.eyes && D.eyes[selEye]; if (EP[lookSel] && (!e || (e.type === 'blank' && lookSel !== 'eye'))) lookSel = e ? 'eye' : 'back';
+    if (EP[lookSel]) { const f = EP[lookSel]; pickOpen('pickhome-eye', { name: 'Eye ' + (selEye + 1) + ': ' + f[1].toLowerCase() + ' colour', undo: true, get: () => (D.eyes[selEye] || {})[f[0]] || f[2], set: v => { if (D.eyes[selEye]) { D.eyes[selEye][f[0]] = v; dirtySkin = true; } } }); }
     else { const name = LOOKS.find(x => x[0] === lookSel)[1]; pickOpen('pickhome-look', { name: name + ' colour', undo: true, get: () => D.look[lookSel], set: v => { D.look[lookSel] = v; dirtySkin = true; } }); }
     swatches();
   }
   // the eyes: any number, each with its own place (dragged on the fish), kind, size and colour
   function eyeUI() {
     const es = D.eyes || []; selEye = clamp(selEye, 0, Math.max(0, es.length - 1)); const box = $('eyelist'); box.textContent = '';
-    es.forEach((e, i) => { const b = document.createElement('button'); b.textContent = 'Eye ' + (i + 1); b.setAttribute('aria-pressed', i === selEye ? 'true' : 'false'); b.addEventListener('click', () => { selEye = i; eyeUI(); if (lookSel === 'eye') pickLook(); }); box.appendChild(b); });
+    es.forEach((e, i) => { const b = document.createElement('button'); b.textContent = 'Eye ' + (i + 1); b.setAttribute('aria-pressed', i === selEye ? 'true' : 'false'); b.addEventListener('click', () => { selEye = i; eyeUI(); if (EP[lookSel]) pickLook(); }); box.appendChild(b); });
     const e = es[selEye], ty = $('eyetypes'); ty.textContent = '';
-    EYES.forEach(([k, name]) => { const b = document.createElement('button'); b.textContent = name; b.disabled = !e; b.setAttribute('aria-pressed', e && e.type === k ? 'true' : 'false'); b.addEventListener('click', () => { remember(false); e.type = k; dirtySkin = true; eyeUI(); }); ty.appendChild(b); });
-    $('eyecol').style.background = e ? e.col : 'transparent'; $('eyecol').disabled = !e; $('deleye').disabled = !e; $('eye').disabled = !e; if (e) { $('eye').value = e.size; $('o-eye').textContent = Math.round(e.size * 100) + '%'; }
+    EYES.forEach(([k, name]) => { const b = document.createElement('button'); b.textContent = name; b.disabled = !e; b.setAttribute('aria-pressed', e && e.type === k ? 'true' : 'false'); b.addEventListener('click', () => { remember(false); e.type = k; dirtySkin = true; eyeUI(); if (EP[lookSel]) pickLook(); }); ty.appendChild(b); });
+    eyeCols(); $('deleye').disabled = !e; $('eye').disabled = !e; if (e) { $('eye').value = e.size; $('o-eye').textContent = Math.round(e.size * 100) + '%'; }
   }
   function pickBrush() { if (mode === 'erase') { $('picker').hidden = true; return; } const m = mode; pickOpen('pickhome-paint', { name: m === 'glow' ? 'Glow brush colour' : 'Brush colour', get: () => brushCol[m], set: v => { brushCol[m] = v; } }); }
 
@@ -455,8 +462,7 @@
     $('f-cut').addEventListener('click', () => { cutting = !cutting; press('f-cut', cutting); say(cutting ? 'Cutting is on: drag across a fin. Press Cut again to go back to reshaping.' : 'Cutting is off.'); });
     $('f-mend').addEventListener('click', () => { const f = curFin(); if (!f || !built) return; remember(true); const code = f === D.tail ? 250 : 2 + selFin; for (let i = 0; i < W * H; i++) if (built.own[i] === code) cut[i] = 0; dirtyShape = true; say('Mended.'); });
     $('addeye').addEventListener('click', () => { if (!built) return; remember(false); const prev = D.eyes[D.eyes.length - 1], e0 = picToDes(built.tables.eye[0], built.tables.eye[1]); D.eyes.push({ p: prev ? [prev.p[0] + 0.035, prev.p[1]] : e0, size: prev ? prev.size : 1, type: prev ? prev.type : 'round', col: prev ? prev.col : D.look.eye }); selEye = D.eyes.length - 1; eyeUI(); swatches(); dirtySkin = true; say('Eye added. Drag it on the fish to place it.'); });
-    $('deleye').addEventListener('click', () => { if (!D.eyes.length) return; remember(false); D.eyes.splice(selEye, 1); selEye = 0; if (lookSel === 'eye') lookSel = 'back'; eyeUI(); pickLook(); dirtySkin = true; });
-    $('eyecol').addEventListener('click', () => { lookSel = 'eye'; pickLook(); });
+    $('deleye').addEventListener('click', () => { if (!D.eyes.length) return; remember(false); D.eyes.splice(selEye, 1); selEye = 0; if (EP[lookSel]) lookSel = 'back'; eyeUI(); pickLook(); dirtySkin = true; });
     ['3d', 'lr', 'tb'].forEach(k => $('pv-' + k).addEventListener('click', () => { paintView = k; ['3d', 'lr', 'tb'].forEach(q => press('pv-' + q, q === k)); }));
     bind('wag', () => D.wag, v => { D.wag = v; }, v => Math.round(v * 100) + '%', true); bind('pace', () => D.pace, v => { D.pace = v; }, v => Math.round(v * 100) + '%', true);
     bind('name', () => D.name, v => { D.name = v; }); bind('bsize', () => $('bsize').value, () => { }, v => v + ' dots'); bind('bstr', () => $('bstr').value, () => { }, v => Math.round(v * 100) + '%');
